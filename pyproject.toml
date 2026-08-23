@@ -1,0 +1,54 @@
+[project]
+name = "ecommerce-checkout-optimization"
+version = "2.0.0"
+description = "Reproducible synthetic marketplace simulator for a checkout / RTO product case study"
+requires-python = ">=3.11"
+
+# Pinned to the versions verified on this machine (Python 3.14.5).
+# The approved stack is fixed by brief §4 — do not add a dependency outside this list
+# without asking. In particular: no deep-learning frameworks, no orchestration tools
+# (Airflow / Prefect / dbt), and no ORM beyond SQLAlchemy Core.
+dependencies = [
+    "numpy>=2.0,<3.0",          # all randomness, via SeedSequence substreams
+    "pandas>=2.2,<4.0",         # transformation and assembly
+    "pyarrow>=17.0",            # Parquet intermediate storage
+    "scipy>=1.13,<2.0",         # distributions, bisection
+    "PyYAML>=6.0,<7.0",         # params.yaml
+    "jsonschema>=4.22,<5.0",    # params.schema.json — fail fast on load
+    "SQLAlchemy>=2.0,<3.0",     # Core only, no ORM
+    "psycopg2-binary>=2.9.9",   # PostgreSQL driver
+    "statsmodels>=0.14.2",      # ground-truth recovery tests (logistic regression)
+    "scikit-learn>=1.5",        # validation benchmarking ONLY (AUC, calibration curve)
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = [
+    "src",
+    "src.config",
+    "src.generators",
+    "src.models",
+    "src.economics",
+    "src.validation",
+    "src.utils",
+]
+
+[tool.pytest.ini_options]
+# tests/ unit-tests the GENERATOR CODE.
+# src/validation/ tests the GENERATED DATA against business targets.
+# These are different things and are deliberately not merged (brief §5).
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

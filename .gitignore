@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Generated data — regenerable from params.yaml + seed, so never committed.
+# EXCEPTIONS below are committed deliberately: they are the reproducibility contract.
+data/raw/
+data/processed/
+data/validation/
+*.parquet
+*.csv
+
+# Committed deliberately (spec §19, brief §5):
+!data/truth/_truth.json
+!data/manifests/*.json
+!data/**/.gitkeep
+
+# Reports: the markdown report is committed, figures are not
+reports/figures/*
+!reports/figures/.gitkeep
+
+# Local environment / secrets — PostgreSQL credentials never enter the repo
+.env
+.env.*
+*.pgpass
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
