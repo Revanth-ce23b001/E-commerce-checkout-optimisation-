@@ -883,14 +883,19 @@ Calibrate γ₀ by bisection so the **blended shipped-order RTO rate = 16.5% ± 
 
 Expected emergent outcome:
 
-| Quantity | Target | Source |
-|---|---|---|
-| Prepaid RTO rate | **4.1%** | Emergent |
-| COD RTO rate | **24.0%** | Emergent |
-| Blended | **16.5%** | 0.62×24.0 + 0.38×4.1 = 16.44% |
-| **Naive COD−prepaid gap** | **19.9pp** | What a crosstab shows |
-| **True planted marginal effect of `is_cod`** | **≈13.4pp** | logistic(−3.15 + 1.60) − logistic(−3.15) = 17.5% − 4.1% |
-| **Selection component** | **≈6.5pp = 33% of the naive gap** | Difference |
+| Quantity | Target | **AS BUILT** | Source |
+|---|---|---|---|
+| Prepaid RTO rate | **4.1%** | **5.75%** | Emergent (CAL-04, SOFT) |
+| COD RTO rate | **24.0%** | **23.39%** | Emergent (CAL-03, SOFT) |
+| Blended | **16.5%** | **16.56%** | The only rate γ₀ solves against (CAL-05, HARD) |
+| **Naive COD−prepaid gap** | **19.9pp** | **17.65pp** | What a crosstab shows |
+| **Marginal effect of `is_cod`** | ~13.4pp | **10.05pp** | **DERIVED** as the AME (decision A6) |
+| **Selection component** | 6.5pp = 33% | **7.60pp = 43.0%** | CAL-11 gate [0.25, 0.45] |
+
+> **The AS BUILT column is the authority.** The Target column's derivation below assumes
+> `γ₀ = −3.15` and `noise_sd = 0.85`; γ₀ is now solved (−5.25) and `noise_sd` was calibrated
+> to 3.3125 against the GT-05 AUC ceiling (decisions A6, A37, A38). See limitation L8.
+> Downstream work must read `data/truth/_truth.json`, not this table.
 
 > **This is the number the entire project exists to produce.** Phase 1 §13 (bonus) claims *"the raw COD–RTO gap over-states the true planted effect by roughly a third."* 6.5 ÷ 19.9 = **32.7%**. The DGP delivers exactly that claim, and `truth_order_probability` lets Phase 5 prove the adjusted analysis recovers it.
 

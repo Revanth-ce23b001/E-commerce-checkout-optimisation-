@@ -657,7 +657,7 @@
             "courier_reliability_z_neg",
             "attempt_delay_days",
             "seller_dispatch_late",
-            "noise_sd_solved",
+            "noise_sd",
             "noise_sd_spec_value"
           ],
           "properties": {
@@ -670,15 +670,13 @@
             "seller_dispatch_late": {
               "type": "number"
             },
-            "noise_sd_solved": {
-              "description": "MACHINE-WRITTEN ONLY. Null until the calibrator runs.",
-              "type": [
-                "number",
-                "null"
-              ]
-            },
             "noise_sd_spec_value": {
               "description": "What Phase 2A specified. Reporting only - never used in a calculation.",
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "noise_sd": {
+              "description": "Decision A37/A38: solved once, then FROZEN. Immutable and covered by CAL-09.",
               "type": "number",
               "exclusiveMinimum": 0
             }
@@ -942,7 +940,6 @@
         "cod_failed_attempt_fee",
         "reverse_handling_base",
         "shrink_rate_by_category",
-        "support_ndr_rto",
         "support_delivered",
         "wc_annual_rate",
         "wc_days_blocked",
@@ -951,7 +948,10 @@
         "cod_fee_charged",
         "cogs_value_basis",
         "preship_cancel_economics",
-        "reconciliation"
+        "reconciliation",
+        "support_ndr_slope",
+        "support_ndr_base_solved",
+        "support_ndr_target_mean"
       ],
       "properties": {
         "forward_freight_base": {
@@ -988,6 +988,16 @@
           "additionalProperties": {
             "$ref": "#/$defs/target"
           }
+        },
+        "support_ndr_base_solved": {
+          "description": "Decision A38. MACHINE-WRITTEN: solved so the realised RTO mean equals the Phase 1 registry value.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "support_ndr_target_mean": {
+          "$ref": "#/$defs/target"
         }
       }
     },
@@ -1079,8 +1089,7 @@
         "share_tolerance_floor",
         "tolerance_n_scaling",
         "max_iterations",
-        "product_price_scalar",
-        "noise_sd"
+        "product_price_scalar"
       ],
       "properties": {
         "share_tolerance_floor": {

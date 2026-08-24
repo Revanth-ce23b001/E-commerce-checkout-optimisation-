@@ -468,7 +468,13 @@ rto_model:
     # symmetric logit-scale noise on a LOW baseline probability is convex, so it
     # lifts prepaid RTO disproportionately. Too little noise depresses prepaid
     # RTO and widens the gap, which is exactly the measured pattern.
-    noise_sd_solved: null                  # machine-written
+    # *** FROZEN at the solved value. NOT in the joint solve. ***
+    # CAL-11's selection share sits 0.02 from its [0.25, 0.45] ceiling and rose
+    # monotonically with noise across the sweep, so anything that raises effective
+    # noise breaks CAL-11 before it breaks anything else. Treated as immutable and
+    # covered by CAL-09: if a later module needs more noise, that is an
+    # escalation, not an adjustment.
+    noise_sd: 3.3125                       # solved 2026-08-24, then frozen
     noise_sd_spec_value: 0.85              # what Phase 2A specified; reporting only
 
 # -----------------------------------------------------------------------------
@@ -658,8 +664,18 @@ economics:
   reverse_handling_noise_sd: 4
   shrink_rate_by_category: {FASHION: 0.12, BEAUTY: 0.10, GROCERY_FMCG: 0.20,
                             HOME_KITCHEN: 0.06, MOBILE_ACC: 0.04, ELECTRONICS: 0.03}
-  support_ndr_rto: 18
-  support_ndr_per_extra_attempt: 6
+  # Decision A38 (NDR half). Phase 1 6.4's registry says "Support/NDR cost per
+  # RTO - 18", a PER-RTO TOTAL, and it is one of the nine lines that produced
+  # -309. Phase 2A's `18 + 6 x (attempts-1)` silently reinterpreted 18 as a BASE,
+  # and can never return 18 -- an RTO by definition exhausted its attempts.
+  # Phase 1 is the senior document, so the registry value is restored and the
+  # attempt-sensitivity is kept:
+  #     support_ndr_cost = base + slope x delivery_attempts
+  # `base` is SOLVED so the realised mean on RTO orders is 18.00 +/-0.50.
+  # A LEVEL solve, so CAL-09 is unaffected.
+  support_ndr_slope: 3
+  support_ndr_base_solved: null            # machine-written
+  support_ndr_target_mean: {target: 18.00, tol: 0.50}
   support_delivered: 2
   wc_annual_rate: 0.14
   wc_days_blocked: {dist: lognormal, mu: 3.36, sigma: 0.22}   # mean ~29.5 days
@@ -776,13 +792,6 @@ calibration_search:
   product_price_scalar:
     bracket: [0.5, 2.0]                    # decision A36
     target: mean_gmv_per_order             # measured on ORDERS, not sessions
-  noise_sd:
-    bracket: [0.5, 8.0]                    # decision A37
-    target_auc: 0.765                      # midpoint of GT-05's [0.74, 0.79]
-    tolerance: 0.010
-    # gamma_0 re-solves INSIDE each noise iteration, so CAL-05 is held at 16.5%
-    # while the AUC is moved. Otherwise the two would fight each other.
-    resolve_gamma_each_iteration: true
   cod_model:
     bracket: [-2.0, 2.0]                   # spec 7.3; beta_0 expected ~ +0.30
     # Decision A15: 08-09 are invariant to beta_0 and are cached.

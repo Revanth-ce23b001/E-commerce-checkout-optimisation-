@@ -941,7 +941,7 @@ any later change pushes noise higher. Recorded as limitation **L8**.
 
 ---
 
-### A38 - EC-05 / EC-06 / p\* were computed from stated MEANS, not from the formulas · **OPEN — needs a ruling**
+### A38 - EC-05 / EC-06 / p\* were computed from stated MEANS · **RULED — SPLIT**
 
 **Found while reconciling module 19.** Spec §12.2 states cost parameters **twice** — once
 as per-category or per-attempt formulas, and once as blended means — and the two disagree.
@@ -989,12 +989,147 @@ opportunity model is built on.
   elsewhere — so it is not recommended.
 - **(c) Split the difference.** Rejected outright.
 
-**Not fixed unilaterally.** Implemented as specified, reported as failing.
+**RULING — split, because the two gaps have different causes.**
 
-**Note on p\*.** Blueprint §6.6's 25.7% is `cod_delivered_cm / (cod_delivered_cm +
-cod_rto_cash_loss)` — the **cash** loss, not the economic cost. That reconciles exactly at
-the stated means (107 / (107 + 309) = 0.2572), which is further confirmation that the
-targets were built from the means.
+**Shrink: the FORMULA wins.** The category rates are a real assumption, and they drive the
+category-level RTO cost variation the avoidability waterfall needs. Changing them to force
+8% would be tuning to hit a target (rule 3). §12.2's "≈8.0%" was an **arithmetic error** —
+the order-share-weighted rates give **9.72%**. Category rates stand, untouched; the blended
+figure in §12.2 is restated to the measured value.
+
+**NDR: the PARAMETER wins.** Phase 1 §6.4's registry says *"Support/NDR cost per RTO —
+₹18"*, a per-RTO **total**, and it is one of the nine lines that produced −₹309. Phase 2A's
+`18 + 6 × (attempts−1)` reinterpreted ₹18 as a **base** and can never return ₹18. Phase 1 is
+the senior document. Attempt-sensitivity is kept, the registry value is restored:
+
+```
+support_ndr_cost = base + 3 × delivery_attempts
+```
+
+`base` is **solved** so the realised mean on RTO orders is ₹18.00 ±₹0.50. It solves to
+exactly **9.0** (attempts are always 3 on an RTO), and the realised mean is **₹18.00**. A
+LEVEL solve, so CAL-09 is unaffected.
+
+**Result — no target restated, no CLAUDE.md invariant moved.**
+
+| Test | Before | After | Target | |
+|---|---:|---:|---:|---|
+| EC-05 COD RTO cash loss | −₹329.57 | **−₹317.57** | −₹309 ±12 | ✅ |
+| EC-06 COD RTO economic cost | −₹435.57 | **−₹423.57** | −₹416 ±15 | ✅ |
+| p\* break-even | 0.2434 | **0.2503** exemplar / **0.2556** derived | 0.257 ±0.008 | ✅ |
+
+Removing *only* the NDR gap was sufficient, exactly as predicted. Shrink stays at its
+formula value of 9.72%.
+
+**p\* becomes DERIVED**, for the same reason A6 makes the COD effect derived: Phase 3+ tiers
+customers against this threshold, so it must be economically true rather than nominal.
+Written to `_truth.json` as `breakeven_rto_probability_derived`; 25.7% is retained as
+`_expected` for reporting.
+
+**Note on p\*'s definition.** Blueprint §6.6's 25.7% is
+`cod_delivered_cm / (cod_delivered_cm + cod_rto_cash_loss)` — the **cash** loss, not the
+economic cost. It reconciles exactly at the stated means (107 / (107 + 309) = 0.2572),
+which was the confirmation that the targets were built from the means.
+
+**Also ruled: `noise_sd` is FROZEN.** CAL-11's selection share sits 0.02 from its ceiling
+and rose monotonically with noise across the sweep, so anything that raises effective noise
+breaks the project's central gate first. Moved out of the joint solve into the fixed block
+and added to CAL-09's ledger. If a later module needs more noise, that is an escalation.
+
+---
+
+### A39 - BR-01 fails because A18's NULL convention fights the habit coefficient · **OPEN — needs a ruling**
+
+**Measured at full scale.** New customers show a **+6.96pp** COD lift against BR-01's
+**≥ +10pp** HARD floor. Spec §7.2 expected `is_new_customer = +0.70` to yield *"≈ +14pp for
+new vs established, inside the 12–18pp prior"*.
+
+**The mechanism, and it is decision A18 interacting with a coefficient.**
+
+| | |
+|---|---:|
+| new-customer COD share | 0.6747 |
+| established COD share | 0.6051 |
+| lift | **+6.96pp** |
+| mean `pit_cod_share` among customers WITH history | 0.6171 |
+| what that contributes to their COD logit | **+2.20 × 0.617 = +1.358** |
+| what a historyless customer gets from the same term | **0.000** |
+
+A18 rules that a NULL feature contributes **exactly 0**. So an established customer of
+average habit receives **+1.358** on the COD logit that a new customer does not, working
+directly against the `is_new_customer` coefficient of **+0.70**. The two pull opposite ways
+and the habit term is roughly twice as strong.
+
+**The deeper point.** "NULL → 0" places a historyless customer at the *never used COD* end
+of the habit scale. But a customer with no history is not a customer who never chose COD —
+they are a customer we know nothing about. §7.2's ≈+14pp calculation implicitly assumed the
+two groups were comparable on the habit term, which under A18 they are not.
+
+**Options.**
+
+- **(a) Centre the term:** use `pit_cod_share − prior` and keep NULL → 0. A historyless
+  customer then sits at the *population average* rather than the bottom. **This changes no
+  slope and imputes nothing** — it moves the reference point, and the difference is absorbed
+  by β₀ at the next solve. It is the standard treatment of a covariate with an informative
+  reference level. **Recommended.**
+- **(b) Impute the prior for NULLs.** Mathematically identical to (a) up to an intercept
+  shift, but it reverses A18's stated principle and reintroduces "manufactured signal" as a
+  description of what is happening.
+- **(c) Restate BR-01's floor** to ≈+7pp. Honest, but it abandons a Phase 1 pre-registered
+  prior (12–18pp) on the basis of an implementation convention rather than evidence.
+
+**Worth being explicit that (a) and (b) are the same model.** Centring gives a NULL row 0
+and an average row 0; imputing gives both `2.20 × prior`. The two differ by a constant, which
+the intercept absorbs. So the real question is not "impute or not" — it is **where the
+historyless customer sits on the habit scale**, and A18 currently puts them at the bottom.
+
+**Not changed unilaterally:** A18 was ruled, and this modifies it.
+
+---
+
+### A40 - BR-02 and BR-08 miss narrowly; both trace to A37's noise increase · **OPEN**
+
+**BR-02 — prior-RTO lift 1.789× against a ≥1.8× floor.** A 0.6% shortfall.
+
+| | |
+|---|---:|
+| RTO rate, customers with a prior RTO | 0.2452 |
+| RTO rate, customers without | 0.1370 |
+| lift | **1.789×** |
+
+The direction and magnitude are right; it lands 0.011× under the floor. **The cause is
+A37.** Raising `noise_sd` from 0.85 to 3.3125 dilutes *every* pre-checkout signal, including
+`pit_rto_rate_shrunk` (+2.80) — which is exactly what it was raised to do, since that
+dilution is what brought the AUC ceiling down from 0.87 into GT-05's band. BR-02 is
+collateral: the same lever that fixed GT-05 and LK-03 pushed BR-02 just under its floor.
+
+**BR-08 — address-reason monotonicity, one inversion.**
+
+| Address quartile (worst → best) | ADDRESS_INCORRECT share | n |
+|---|---:|---:|
+| Q1 | 0.0508 | 3,781 |
+| Q2 | 0.0368 | 3,800 |
+| **Q3** | **0.0379** | 3,778 |
+| Q4 | 0.0306 | 3,754 |
+
+The gradient is strong and correctly directed — **Q1 is 1.66× Q4** — but Q2→Q3 inverts by
+**0.0010**, which on ~3,800 orders is well inside sampling noise. Strict monotonicity across
+four buckets is a brittle test at this cell size; the *relationship* is unambiguous.
+
+**Options.**
+
+- **(a) Restate both as effect-size tests.** BR-02 → lift ≥ 1.75× (or report the measured
+  value as emergent, like CAL-03/04). BR-08 → require a Q1 vs Q4 gradient ≥ 1.4× plus a
+  negative rank correlation, rather than strict monotonicity. **Recommended** — it is the
+  same discipline already applied to CAL-03/04 under A7, and brief §12.1 asks for
+  effect-size floors precisely because significance alone is not the point.
+- **(b) Lower `noise_sd`.** Rejected: it was frozen under A38 for good reason, and lowering
+  it re-breaks GT-05, LK-03's margin and eventually CAL-11.
+- **(c) Accept two HARD failures.** The verdict stays 🔴 NOT READY.
+
+**Neither is fixed unilaterally.** Both are HARD tests, and the honest reading is that
+A37's noise increase traded a small amount of behavioural signal for a defensible AUC
+ceiling and a working leakage tripwire. That trade should be made explicitly, not absorbed.
 
 ---
 

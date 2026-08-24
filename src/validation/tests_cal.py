@@ -52,9 +52,11 @@ COEFFICIENTS_KEY = "coefficients"
 # coefficient could be nudged without any test noticing.
 SHOCK_KEY = "post_dispatch_shock"
 SHOCK_PREFIX = "shock."
-# Not a slope: the spec calls this "the AUC ceiling lever" and GT-05 sets the
-# ceiling as a target, so it is a calibrated quantity by design.
-SHOCK_EXCLUDED = ("noise_sd_solved", "noise_sd_spec_value")
+# `noise_sd` WAS the one exclusion here. Decision A38 froze it at its solved
+# value, so CAL-09 now protects it like any other coefficient -- CAL-11 sits 0.02
+# from its ceiling and rises with noise, so a silent change to this number would
+# break the gate before it broke anything else.
+SHOCK_EXCLUDED = ("noise_sd_spec_value",)
 REASONS_BLOCK = "rto_reasons"
 FROZEN_HASH_KEY = "frozen_hash"
 IMMUTABLE_REASON_KEYS = ("base_weights", "driver_weights", "class_map")

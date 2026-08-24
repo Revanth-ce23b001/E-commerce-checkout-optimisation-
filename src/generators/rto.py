@@ -107,10 +107,14 @@ def stage1_dynamic(
 def record_shock_coefficients(params, ledger: CoefficientLedger) -> dict[str, float]:
     """Record the three Stage-2 deltas once, for reuse inside the day loop."""
     cfg = params.require(f"{BLOCK}.post_dispatch_shock")
+    # `noise_sd` is recorded alongside the three deltas. Decision A38 froze it, so
+    # CAL-09 protects it like any other coefficient -- and a protected value has to
+    # appear in the ledger as CONSUMED, or CAL-09 reports it as a planted
+    # relationship silently absent from the data.
     return {
         name: ledger.record(BLOCK, f"shock.{name}", cfg[name])
         for name in ("courier_reliability_z_neg", "attempt_delay_days",
-                     "seller_dispatch_late")
+                     "seller_dispatch_late", "noise_sd")
     }
 
 

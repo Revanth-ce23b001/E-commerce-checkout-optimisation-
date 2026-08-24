@@ -1,0 +1,140 @@
+{
+  "run_manifest": {
+    "master_seed": 20260115,
+    "params_sha256": "a7203c7f296f82836ae5472348df06084085a3d43413b45b8e03763832f93bf3",
+    "dgp_sha256": "24515e3515d079f8308c2dd5504a60d5f08df28d25ea59fef5bed3a8fe49deda",
+    "generated_at_utc": "2026-08-24T16:56:20.310008+00:00",
+    "generator_version": "2.0.0"
+  },
+  "calibrated_levels": {
+    "cod_model_beta0": -0.25,
+    "rto_model_gamma0": -5.25,
+    "conversion_model_alpha0": 0.28125,
+    "pre_window_cod_pi0": 0.515625,
+    "pre_window_rto_pi0": -3.375,
+    "product_price_scalar": 1.0390625,
+    "support_ndr_base": 9.0
+  },
+  "frozen": {
+    "post_dispatch_noise_sd": 3.3125,
+    "post_dispatch_noise_sd_spec_value": 0.85
+  },
+  "planted_causal_effects": {
+    "cod_on_rto": {
+      "logit_coefficient": 1.6,
+      "odds_ratio": 4.953032424395115,
+      "average_marginal_effect_pp": 10.04915391901595,
+      "naive_observed_gap_pp": 17.64515904169977,
+      "selection_share_of_naive_gap": 0.43048663402424575,
+      "naive_over_truth_multiple": 1.7558850410590237,
+      "spec_prose_values_superseded": {
+        "marginal_effect_pp": 13.4,
+        "naive_gap_pp": 19.9,
+        "selection_share": 0.327,
+        "note": "belong to noise_sd = 0.85; see limitation L8"
+      }
+    },
+    "address_completeness_on_rto": {
+      "logit_coefficient": -1.4
+    }
+  },
+  "economics_targets": {
+    "mean_gmv_per_order": 1001.076568003646,
+    "mean_order_value_per_order": 919.6019454438596,
+    "cod_delivered_cm": 108.98266246498599,
+    "cod_rto_cash_loss": -317.33013683969114,
+    "cod_rto_economic_cost": -424.380165889458,
+    "breakeven_rto_probability_derived": 0.25564013710763184,
+    "breakeven_rto_probability_expected": 0.257,
+    "annualization_factor_derived": 227.21678374642607,
+    "annualization_factor_expected": 240.0
+  },
+  "coefficient_ledger": {
+    "cod_model": {
+      "latent_trust": -0.55,
+      "latent_liquidity": -0.45,
+      "latent_intent": 0.4,
+      "latent_price_sensitivity": 0.12,
+      "geo_tier[METRO]": -0.45,
+      "geo_tier[TIER1]": -0.15,
+      "geo_tier[TIER2]": 0.25,
+      "geo_tier[TIER3]": 0.55,
+      "has_saved_instrument": -0.6,
+      "cod_cultural_index_z": 0.3,
+      "log_order_value": 0.28,
+      "log_order_value_sq": -0.12,
+      "seller_rating_centered": -0.35,
+      "product_rating_centered": -0.3,
+      "log1p_review_count_centered": -0.12,
+      "est_delivery_days_centered": 0.09,
+      "discount_pct_centered": 0.15,
+      "cart_size_ge3": 0.22,
+      "category[FASHION]": 0.3,
+      "category[BEAUTY]": 0.1,
+      "category[HOME_KITCHEN]": 0.05,
+      "category[MOBILE_ACC]": 0.15,
+      "category[ELECTRONICS]": -0.35,
+      "category[GROCERY_FMCG]": -0.1,
+      "is_month_end": 0.14,
+      "pit_cod_share": 2.2,
+      "log1p_prepaid_success": -0.35,
+      "is_new_customer": 0.7,
+      "log1p_orders_delivered": -0.18,
+      "payment_failure_rate": 1.1
+    },
+    "rto_model": {
+      "is_cod": 1.6,
+      "latent_intent": 0.7,
+      "latent_liquidity": -0.55,
+      "latent_trust": -0.3,
+      "geo_tier[METRO]": -0.35,
+      "geo_tier[TIER1]": -0.1,
+      "geo_tier[TIER2]": 0.2,
+      "geo_tier[TIER3]": 0.45,
+      "serviceability_z": -0.25,
+      "address_completeness": -1.4,
+      "seller_sla_breach_rate": 1.2,
+      "seller_rating_centered": -0.28,
+      "product_rating_centered": -0.15,
+      "log1p_review_count_centered": -0.05,
+      "log_order_value": 0.15,
+      "discount_pct_centered": 0.18,
+      "cart_size_ge3": 0.25,
+      "est_delivery_days_centered": 0.11,
+      "category[FASHION]": 0.35,
+      "category[BEAUTY]": 0.05,
+      "category[HOME_KITCHEN]": 0.0,
+      "category[MOBILE_ACC]": 0.1,
+      "category[ELECTRONICS]": -0.2,
+      "category[GROCERY_FMCG]": -0.15,
+      "pit_rto_rate_shrunk": 2.8,
+      "is_new_customer": 0.45,
+      "log1p_orders_delivered": -0.22,
+      "pit_cod_share": 0.35,
+      "paid_via_switch": -0.45,
+      "month_end_x_cod": 0.3,
+      "shock.courier_reliability_z_neg": 0.4,
+      "shock.attempt_delay_days": 0.22,
+      "shock.seller_dispatch_late": 0.25,
+      "shock.noise_sd": 3.3125
+    },
+    "conversion_model": {
+      "log_order_value": -0.18,
+      "address_completeness": 0.9,
+      "est_delivery_days_centered": -0.07,
+      "shipping_fee_charged_gt0": -0.45,
+      "device_web": -0.25,
+      "cart_size_ge3": -0.12,
+      "pit_is_new_customer": -0.35
+    }
+  },
+  "achieved": {
+    "n_orders": 105626,
+    "cod_share": 0.6220248802378202,
+    "checkout_conversion": 0.681458064516129,
+    "rto_rate_blended": 0.16556748466257667,
+    "rto_rate_cod_emergent": 0.2339192789828508,
+    "rto_rate_prepaid_emergent": 0.0574676885658531,
+    "auc_ceiling_precheckout": 0.7701948049843368
+  }
+}

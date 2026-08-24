@@ -153,6 +153,9 @@ def build_orders(params, sessions: pd.DataFrame, extra: dict,
         "discount_pct": sessions["discount_pct"].to_numpy()[idx],
         "order_value": sessions["order_value"].to_numpy()[idx],
         "payment_method": np.where(extra["is_cod_order"][idx], "COD", "PREPAID"),
+        # DQ-13: NULL if and only if the order is COD. The DDL enforces the same
+        # thing as a CHECK, and the economics module reads it to pick the PG rate.
+        "payment_rail": sessions["payment_rail"].to_numpy()[idx],
         "paid_via_switch": extra["switched"][idx],
         "estimated_delivery_days": est,
         "promised_delivery_date": order_date + pd.to_timedelta(est, unit="D"),

@@ -38,7 +38,12 @@ from src.generators.history import generate_history  # noqa: E402
 from src.generators.products import generate_products  # noqa: E402
 from src.generators.sellers import generate_sellers  # noqa: E402
 from src.generators.sessions import generate_sessions  # noqa: E402
+from src.generators.rollup import rollup_customers, write_truth  # noqa: E402
+from src.generators.rto_reasons import build_reason_drivers, generate_rto_reasons  # noqa: E402
 from src.generators.simulate import prepare, simulate_window, solve_all  # noqa: E402
+from src.economics.order_economics import (  # noqa: E402
+    derive_breakeven, generate_economics, reconcile_exemplar, solve_ndr_base,
+)
 from src.models.logit import CoefficientLedger, logistic  # noqa: E402
 from src.validation.tests_cal import cal_09_no_slope_changed, cal_11_selection_share  # noqa: E402
 from src.validation.tests_lk import lk_06_shrinkage_prior_is_declared  # noqa: E402
@@ -124,6 +129,28 @@ def main(argv: list[str] | None = None) -> int:
         params, sessions_out, extra, rng.get("payment")
     )
 
+    print("18-21  reasons, economics, roll-up, truth file ...", flush=True)
+    order_positions = np.flatnonzero(extra["converted"])
+    drivers = build_reason_drivers(
+        orders, state, latents, geography, sessions_out, products,
+        extra["attempt_delay"][order_positions],
+        setup["ctx"]["is_month_end"][order_positions],
+    )
+    reasons = generate_rto_reasons(params, orders, drivers, rng.get("reason"))
+    orders = orders.merge(reasons, on="order_id", how="left")
+
+    # Decision A38: solve the NDR base so the realised RTO mean is the Phase 1
+    # registry value, then write it back before the cost lines are computed.
+    params.raw["economics"]["support_ndr_base_solved"] = solve_ndr_base(params, orders)
+    economics = generate_economics(
+        params, orders, products, geography, rng.get("economics")
+    )
+    customers = rollup_customers(customers, orders, economics)
+    truth = write_truth(
+        REPO_ROOT / "data" / "truth" / "_truth.json", params, solved, metrics,
+        orders, economics, _auc(params, extra), ledger,
+    )
+
     tables = {
         "dim_date": dates, "dim_geography": geography, "dim_seller": sellers,
         "dim_product": products, "dim_customer": customers,
@@ -132,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
         "fct_customer_state_at_session": state,
         "fct_order": orders,
         "fct_payment_attempt": attempts,
+        "fct_order_economics": economics,
     }
     # Not a table: carried through so the A36 ratio check can compare the
     # realised category mix against what params.yaml declares.
@@ -145,7 +173,74 @@ def main(argv: list[str] | None = None) -> int:
 
     report(params, setup, {**tables, "_declared_category_means": declared_means},
            history, solved, metrics, ledger)
+    report_economics(params, economics, orders, truth)
     return 0
+
+
+def _auc(params, extra) -> float:
+    from sklearn.metrics import roc_auc_score
+    mask = extra["shipped"] & ~extra["censored"]
+    return float(roc_auc_score(extra["rto_flag"][mask], extra["p_rto_precheckout"][mask]))
+
+
+def report_economics(params, economics, orders, truth) -> None:
+    """Module 19 reconciliation, with shrink and NDR broken out (decision A38)."""
+    rule = "=" * 78
+    print(f"\n{rule}\nMODULE 19 — ECONOMICS RECONCILIATION\n{rule}")
+
+    cfg = params.require("economics")
+    weights = params.require("distributions.category_weights")
+    shrink_blend = sum(
+        float(cfg["shrink_rate_by_category"][k]) * float(weights[k]) for k in weights
+    )
+    rto = orders["rto_flag"].fillna(False).to_numpy(bool)
+    ndr_mean = float(economics.loc[rto.nonzero()[0], "support_ndr_cost"].mean())         if rto.any() else 0.0
+
+    print("\n1. THE TWO A38 LINES, BROKEN OUT")
+    print(f"   shrink, category-weighted   {shrink_blend:.4%} of COGS   "
+          f"<- FORMULA WINS; spec 12.2's '8.0%' was an arithmetic error")
+    target = cfg["support_ndr_target_mean"]
+    ok = abs(ndr_mean - float(target["target"])) <= float(target["tol"])
+    print(f"   NDR, realised mean on RTO   {ndr_mean:8.2f}   "
+          f"target {float(target['target']):.2f} +/-{float(target['tol']):.2f}  "
+          f"{'PASS' if ok else 'FAIL'}")
+    print(f"   NDR base solved             {float(params.require('economics.support_ndr_base_solved')):8.4f}"
+          f"   <- PARAMETER WINS; Phase 1 6.4 registry")
+
+    print("\n2. EC-03..EC-06 AT A 1,000 GMV ORDER")
+    exemplar = reconcile_exemplar(params)
+    rec = params.require("economics.reconciliation")
+    for key, test in (("prepaid_delivered_cm", "EC-03"), ("cod_delivered_cm", "EC-04"),
+                      ("cod_rto_cash_loss", "EC-05"), ("cod_rto_economic_cost", "EC-06")):
+        got, t = exemplar[key], rec[key]
+        ok = abs(got - float(t["target"])) <= float(t["tol"])
+        print(f"   [{'PASS' if ok else 'FAIL'}] {test} {key:<24} {got:8.2f}  "
+              f"target {float(t['target']):7.1f} +/-{float(t['tol']):.0f}")
+
+    print("\n3. p* — DERIVED from realised economics (decision A38)")
+    t = rec["breakeven_rto_prob"]
+    nominal = exemplar["breakeven_rto_prob"]
+    derived = truth["economics_targets"]["breakeven_rto_probability_derived"]
+    for label, value in (("exemplar", nominal), ("DERIVED (realised)", derived)):
+        ok = abs(value - float(t["target"])) <= float(t["tol"])
+        print(f"   [{'PASS' if ok else 'FAIL'}] p* {label:<20} {value:.4f}  "
+              f"target {float(t['target']):.3f} +/-{float(t['tol']):.3f}")
+    print("   Phase 3+ tiering uses the DERIVED value — the threshold must be")
+    print("   economically true, not nominal.")
+
+    print("\n4. EMPIRICAL MEANS ACROSS THE ACTUAL ORDER DISTRIBUTION")
+    print("   (spec 12.4: these WILL differ from the exemplar. Report, do not tune.)")
+    e = truth["economics_targets"]
+    print(f"   mean COD RTO cash loss      {e['cod_rto_cash_loss']:8.2f}")
+    print(f"   mean COD RTO economic cost  {e['cod_rto_economic_cost']:8.2f}")
+    print(f"   mean COD delivered CM       {e['cod_delivered_cm']:8.2f}")
+    exposure = (
+        economics["rto_economic_cost"].sum()
+        * e["annualization_factor_derived"] / 1e7
+    )
+    print(f"   annualised RTO exposure     {exposure:8.1f} Cr   "
+          f"EC-07 band 150-180 (SOFT)  {'PASS' if 150 <= exposure <= 180 else 'FAIL'}")
+    print(rule)
 
 
 def report(params, setup, tables, history, solved, m, ledger) -> None:

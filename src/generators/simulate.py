@@ -408,7 +408,7 @@ def _metrics(setup, converted, is_cod_order, switched, shipped, cancelled, censo
 
 
 def solve_all(setup: dict, params, pre_window) -> dict:
-    """The seven-way alternating solve. Every level; zero slopes.
+    """The alternating level solve. Every level; zero slopes.
 
     Order within a pass is chosen so each solve sees the most settled version of
     everything it depends on:
@@ -418,10 +418,13 @@ def solve_all(setup: dict, params, pre_window) -> dict:
        population rather than the session population.
     2. **alpha_0** — conversion.
     3. **beta_0** — COD share, which depends on who converted.
-    4. **noise_sd + gamma_0** (A37) — solved together. gamma_0 re-solves inside
-       every noise iteration, so CAL-05 is held at 16.5% while the AUC is moved.
-       Solved separately they would fight: more noise lowers the AUC *and* lifts
-       the blended rate, so gamma_0 would chase noise_sd around forever.
+    4. **gamma_0** — the blended RTO rate (decision A7: CAL-05 alone).
+
+    ``noise_sd`` was the seventh level and is now **FROZEN** (decision A38). It was
+    solved once against the GT-05 AUC ceiling and then fixed, because CAL-11's
+    selection share sits 0.02 from its ceiling and rises monotonically with noise —
+    so anything that moves noise breaks the project's central gate before it breaks
+    anything else. It is read here, never solved, and CAL-09 protects it.
 
     The two pre-window levels are solved once, outside: pre-window history is
     generated from latents alone, and no in-window quantity can reach back before
@@ -439,13 +442,10 @@ def solve_all(setup: dict, params, pre_window) -> dict:
             float(targets[name]["tol"]),
         )
 
-    alpha0, beta0, gamma0 = 0.25, -0.25, -4.125
+    alpha0, beta0, gamma0 = 0.25, -0.25, -5.25
     scalar = 1.0
-    noise = float(params.require("rto_model.post_dispatch_shock.noise_sd_spec_value"))
+    noise = float(params.require("rto_model.post_dispatch_shock.noise_sd"))  # FROZEN
     results: dict = {}
-
-    noise_cfg = search["noise_sd"]
-    target_auc = float(noise_cfg["target_auc"])
 
     def solve_gamma(sc: float, nz: float):
         return solve_intercept(
@@ -491,27 +491,12 @@ def solve_all(setup: dict, params, pre_window) -> dict:
         )
         beta0 = results["cod_model"].intercept
 
-        # AUC FALLS as noise rises, and solve_intercept requires a non-decreasing
-        # objective -- so it is negated rather than special-cased.
-        def auc_objective(nz: float) -> float:
-            g = solve_gamma(scalar, nz).intercept
-            return -simulate_window(setup, alpha0, beta0, g, scalar, nz).auc_precheckout
-
-        results["noise_sd"] = solve_intercept(
-            auc_objective, block="noise_sd", target=-target_auc,
-            tolerance=float(noise_cfg["tolerance"]),
-            bracket=tuple(noise_cfg["bracket"]),
-            max_iterations=int(search["max_iterations"]),
-        )
-        noise = results["noise_sd"].intercept
-
         results["rto_model"] = solve_gamma(scalar, noise)
         gamma0 = results["rto_model"].intercept
 
     drift = {
         "alpha_0": abs(alpha0 - previous[0]), "beta_0": abs(beta0 - previous[1]),
         "gamma_0": abs(gamma0 - previous[2]), "price_scalar": abs(scalar - previous[3]),
-        "noise_sd": abs(noise - previous[4]),
         "pi_cod0": 0.0, "pi_rto0": 0.0,   # provably independent; see the docstring
     }
     return {

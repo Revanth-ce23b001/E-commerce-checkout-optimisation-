@@ -71,13 +71,20 @@ Only the first row is an input. Everything else is an **output** — measured af
 generation, not asserted before it (decisions A6, A7). Treating an emergent
 quantity as an invariant is how a slope gets nudged to hit it.
 
-| Quantity | Value | Status |
+| Quantity | As built | Status |
 |---|---|---|
 | `is_cod` coefficient in the RTO logit | **+1.60** | **INVARIANT** — spec constant |
-| True marginal effect of COD on RTO | ≈ 13.4pp | **EXPECTED** — measured post-hoc as the AME |
-| Naive observed COD−prepaid gap | ≈ 19.9pp | **EMERGENT** |
-| Selection share of the naive gap | ≈ 33% | **EMERGENT** — gated by CAL-11 at [0.25, 0.45] |
-| Achievable risk-model AUC ceiling | 0.74 – 0.79 | **EXPECTED** |
+| True marginal effect of COD on RTO (AME) | **10.05pp** | **DERIVED** — measured post-hoc |
+| Naive observed COD−prepaid gap | **17.65pp** | **EMERGENT** |
+| Selection share of the naive gap | **0.430** | **EMERGENT** — gated by CAL-11 at [0.25, 0.45] |
+| Achievable risk-model AUC ceiling | **0.7702** | **DERIVED** — `noise_sd` calibrated to it (A37) |
+
+⚠️ **The spec's prose figures — 13.4pp, 19.9pp, 33% — belong to `noise_sd = 0.85` and no
+longer describe this dataset** (limitation L8, decision A37). The values above are measured.
+**Everything downstream quotes `data/truth/_truth.json`, never the spec prose.**
+
+The finding is unchanged in kind and sharper in degree: the naive estimate is **1.76× the
+truth**, not "overstates by about a third".
 
 `rto_model.intercept_solved` (γ₀) is **not** a spec constant. It is whatever the
 calibrator solves for CAL-05. It is never moved to make the AME land on 13.4pp.

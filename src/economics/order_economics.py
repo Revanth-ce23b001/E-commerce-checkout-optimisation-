@@ -128,10 +128,12 @@ def generate_economics(
     ) * rto
 
     # --- asymmetric, and delivered-only -------------------------------------
+    # Decision A38: base + slope x attempts, with the base SOLVED so the realised
+    # mean on RTO orders is the Phase 1 registry value of 18.
+    ndr_base = float(params.require("economics.support_ndr_base_solved"))
     support = np.where(
         rto,
-        float(cfg["support_ndr_rto"])
-        + float(cfg["support_ndr_per_extra_attempt"]) * np.maximum(attempts - 1, 0),
+        ndr_base + float(cfg["support_ndr_slope"]) * attempts,
         float(cfg["support_delivered"]) * delivered,
     )
     ops = float(cfg["ops_allocation_delivered"]) * delivered
@@ -204,6 +206,52 @@ def _counterfactual_cm(
     return net_revenue_if_delivered - cogs_ratio * net_revenue_if_delivered - variable
 
 
+def solve_ndr_base(params, orders: pd.DataFrame) -> float:
+    """Solve the NDR base so the realised mean on RTO orders hits the registry value.
+
+    Decision A38. Linear in the base, so it is solved in closed form rather than
+    bisected — ``mean = base + slope * mean(attempts)``. It is still a calibrated
+    LEVEL and is machine-written like every other one.
+    """
+    cfg = params.require("economics")
+    target = float(cfg["support_ndr_target_mean"]["target"])
+    slope = float(cfg["support_ndr_slope"])
+
+    rto = orders["rto_flag"].fillna(False).to_numpy(bool)
+    if not rto.any():
+        raise ValueError("No RTO orders — the NDR base cannot be solved.")
+    mean_attempts = float(
+        np.nan_to_num(orders["delivery_attempts"].to_numpy(float), nan=1.0)[rto].mean()
+    )
+    return target - slope * mean_attempts
+
+
+def derive_breakeven(economics: pd.DataFrame, orders: pd.DataFrame) -> dict[str, float]:
+    """p* from the REALISED economics, not the nominal exemplar.
+
+    Decision A38 makes this derived, for the same reason A6 makes the COD effect
+    derived: Phase 3+ tiers customers against this threshold, so it has to be
+    economically true rather than nominal. Tiering on a nominal 25.7% when the
+    realised break-even is 25.0% would mis-price every order near the boundary.
+    """
+    merged = economics.merge(
+        orders[["order_id", "payment_method", "rto_flag", "is_delivered"]], on="order_id"
+    )
+    cod = merged["payment_method"] == "COD"
+    delivered = cod & merged["is_delivered"].fillna(False).to_numpy(bool)
+    rto = cod & merged["rto_flag"].fillna(False).to_numpy(bool)
+
+    cm_delivered = float(merged.loc[delivered, "contribution_margin"].mean())
+    cash_loss = float(merged.loc[rto, "rto_cash_loss"].mean())
+    econ_cost = float(merged.loc[rto, "rto_economic_cost"].mean())
+    return {
+        "cod_delivered_cm": cm_delivered,
+        "cod_rto_cash_loss": -cash_loss,
+        "cod_rto_economic_cost": -econ_cost,
+        "breakeven_rto_probability_derived": cm_delivered / (cm_delivered + cash_loss),
+    }
+
+
 def reconcile_exemplar(params, gmv: float = 1000.0) -> dict[str, float]:
     """The spec §12.4 reconciliation at a single ₹1,000 **GMV** order.
 
@@ -238,15 +286,16 @@ def reconcile_exemplar(params, gmv: float = 1000.0) -> dict[str, float]:
     wc_cfg = cfg["wc_days_blocked"]
     days = np.exp(float(wc_cfg["mu"]) + float(wc_cfg["sigma"]) ** 2 / 2)
     working_capital = cogs_value * float(cfg["wc_annual_rate"]) * days / 365.0
-    attempts = int(params.require("fulfilment.max_delivery_attempts"))
+    # The NDR line reconciles to the Phase 1 registry value by construction
+    # (decision A38): the base is solved so the realised RTO mean equals it.
+    ndr = float(cfg["support_ndr_target_mean"]["target"])
 
     rto_cash = (
         forward + packaging
         + float(cfg["reverse_freight_multiplier"]) * forward
         + float(cfg["reverse_handling_base"])
         + shrink + working_capital + float(cfg["cod_failed_attempt_fee"])
-        + float(cfg["support_ndr_rto"])
-        + float(cfg["support_ndr_per_extra_attempt"]) * (attempts - 1)
+        + ndr
     )
     return {
         "prepaid_delivered_cm": prepaid_cm,
