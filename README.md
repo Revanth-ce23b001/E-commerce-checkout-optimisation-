@@ -10,15 +10,20 @@ A dataset where the obvious analysis produces the obvious right answer is a fail
 
 ## Status
 
-**Phase 2B — Stage 2 complete; generation modules 02–07 built and checkpointed.**
+**Phase 2B — generation modules 02–12 built and checkpointed.**
 
-Dimensions, latents and pre-window customer history exist and pass their checkpoint: both
-pre-window intercepts converge, and all seven latent → history correlation signs match the
-planted coefficients. Modules 08–23 (sessions onward) are not started, and no full dataset
-has been generated.
+Dimensions, latents, pre-window history, sessions, point-in-time state and the full checkout
+funnel exist. Four intercepts solve cleanly: COD share lands on 0.6200 and conversion on
+0.6762. Modules 13–23 (orders, cancellations, RTO, economics) are not started.
 
-Open: **A27** — the distribution values modules 02–07 need are written into `params.yaml`
-tagged `[A27 PROPOSED]` and are **not yet approved**. See `docs/decision_register.md`.
+Open, both needing a ruling:
+
+- **A31** — VOL-01 (≥100,000 orders), VOL-02 (145–150k sessions) and CAL-06 (68% ±2pp) are
+  jointly knife-edge. The realised conversion sits comfortably inside CAL-06 and still
+  produces **99,441 orders**, so VOL-01 fails.
+- **A28** — distribution values for modules 08–12, tagged `[A28 PROPOSED]`.
+
+See `docs/decision_register.md`.
 
 ## Source of truth
 

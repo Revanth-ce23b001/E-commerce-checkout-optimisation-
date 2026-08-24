@@ -83,8 +83,19 @@ def generate_products(params, sellers: pd.DataFrame, rng: Generator) -> pd.DataF
         _SUB_CATEGORIES[c][rng.integers(0, len(_SUB_CATEGORIES[c]))] for c in categories
     ]
 
+    # `category_mean_gmv` is the target mean **GMV per order** (decision A5), and
+    # gmv = list_price x quantity (spec §3.10). So the list-price mean must be the
+    # GMV target divided by E[quantity], or mean GMV overshoots by 12.5% and EC-01
+    # fails by ~₹125 against a ±₹25 tolerance.
+    #
+    # This is implementing A5 correctly, not changing it. See decision A29 for the
+    # related spec inconsistency: order_value is marked Stage-2 SAFE but depends on
+    # quantity, which §3.10 marks Stage 3.
+    expected_quantity = _expected_quantity(params)
+    price_means = {c: float(v) / expected_quantity for c, v in category_mean_gmv.items()}
+
     frame["list_price"] = _category_lognormal_price(
-        rng, categories, category_mean_gmv, category_sigma, truncation
+        rng, categories, price_means, category_sigma, truncation
     ).round(2)
 
     frame["product_rating"] = beta_scaled(rng, rating_spec, n).round(2)
@@ -106,6 +117,15 @@ def generate_products(params, sellers: pd.DataFrame, rng: Generator) -> pd.DataF
     frame["is_returnable"] = _returnable(rng, categories, product["is_returnable_by_category"])
 
     return frame
+
+
+def _expected_quantity(params) -> float:
+    """E[quantity] from ``distributions.session.quantity_weights``."""
+    weights = params.require("distributions.session.quantity_weights")
+    total = sum(float(w) for w in weights.values())
+    if not np.isclose(total, 1.0):
+        raise ValueError(f"quantity_weights sum to {total}, expected 1.0")
+    return float(sum(int(q) * float(w) for q, w in weights.items()))
 
 
 def _draw_categories(rng: Generator, weights: dict[str, float], n: int) -> np.ndarray:

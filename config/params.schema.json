@@ -350,7 +350,9 @@
         "seller",
         "product",
         "customer",
-        "pre_window"
+        "pre_window",
+        "session",
+        "conversion"
       ],
       "properties": {
         "geo_tier_weights": {
@@ -425,6 +427,16 @@
         },
         "pre_window": {
           "description": "[A27 PROPOSED] Distribution the spec requires but never quantified. Not yet approved; see decision_register.md A27.",
+          "type": "object",
+          "minProperties": 1
+        },
+        "session": {
+          "description": "[A28 PROPOSED] Distribution the spec requires but never quantified (modules 08-12). See decision_register.md A28.",
+          "type": "object",
+          "minProperties": 1
+        },
+        "conversion": {
+          "description": "[A28 PROPOSED] Distribution the spec requires but never quantified (modules 08-12). See decision_register.md A28.",
           "type": "object",
           "minProperties": 1
         }

@@ -1,13 +1,12 @@
 """Run the generation pipeline.
 
-Currently implements **modules 02–07 only** — dates, geography, sellers,
-products, customers + latents, pre-window history. Modules 08 onward are gated
-on decision A26 and are not written yet.
+Currently implements **modules 02–12** — dates, geography, sellers, products,
+customers + latents, pre-window history, sessions, point-in-time state, COD
+intent, the two conversion hurdles, payment attempts and conversion. Modules
+13–23 (orders onward) are not written yet.
 
-Ends with the Stage-2 checkpoint the brief requires before proceeding:
-
-    "Modules 02–07 ... **Checkpoint:** latents must correlate with history in the
-     specified directions before proceeding."
+Ends with two checkpoints: the brief's Stage-2 gate (latents must correlate with
+history in the specified directions) and the modules 08–12 funnel gate.
 
 Usage
 -----
@@ -35,10 +34,14 @@ from src.generators.customers import generate_customers  # noqa: E402
 from src.generators.dates import generate_dates  # noqa: E402
 from src.generators.geography import generate_geography  # noqa: E402
 from src.generators.history import generate_history  # noqa: E402
+from src.generators.checkout_pipeline import run_checkout  # noqa: E402
 from src.generators.products import generate_products  # noqa: E402
 from src.generators.sellers import generate_sellers  # noqa: E402
+from src.generators.sessions import generate_sessions  # noqa: E402
+from src.generators.state_snapshots import empty_ledger, generate_state_snapshots  # noqa: E402
 from src.models.logit import CoefficientLedger  # noqa: E402
 from src.validation.tests_cal import cal_09_no_slope_changed  # noqa: E402
+from src.validation.tests_lk import lk_06_shrinkage_prior_is_declared  # noqa: E402
 
 PARAMS = REPO_ROOT / "config" / "params.yaml"
 SCHEMA = REPO_ROOT / "config" / "params.schema.json"
@@ -105,6 +108,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     customers = customers.merge(result.history, on="customer_id", how="left")
 
+    print("08  fct_checkout_session ...", flush=True)
+    sessions = generate_sessions(
+        params, dates, customers, products, geography, latents, rng.get("session")
+    )
+
+    print("09  fct_customer_state_at_session (chronological pass) ...", flush=True)
+    # Modules 13-17 do not exist, so nothing resolves inside the window and every
+    # pit_* value reflects pre-window history alone. The ledger interface is the
+    # real one; when the A1 day loop closes, this call does not change.
+    state = generate_state_snapshots(params, sessions, customers, empty_ledger())
+
+    print("10-12  COD intent, hurdles, payment attempts, conversion ...", flush=True)
+    checkout = run_checkout(
+        params, sessions, state, customers, latents, products, sellers, geography,
+        dates, rng.get("cod"), rng.get("payment"), rng.get("conversion"), ledger,
+    )
+
     tables = {
         "dim_date": dates,
         "dim_geography": geography,
@@ -112,6 +132,11 @@ def main(argv: list[str] | None = None) -> int:
         "dim_product": products,
         "dim_customer": customers,
         "truth_customer_latent": latents,
+        "fct_checkout_session": checkout.sessions,
+        "fct_customer_state_at_session": state,
+        "fct_payment_attempt": checkout.payment_attempts,
+        "fct_checkout_event": checkout.checkout_events,
+        "truth_order_probability": checkout.truth,
     }
 
     if not args.no_write:
@@ -121,6 +146,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nwrote {len(tables)} table(s) to {OUT_DIR}")
 
     print_checkpoint(params, tables, result, ledger)
+    print_checkout_checkpoint(params, tables, state, checkout, ledger)
     return 0
 
 
@@ -208,6 +234,90 @@ def print_checkpoint(params, tables, result, ledger) -> None:
     else:
         print("Latent -> history directions all match the planted coefficients.")
     print(f"{rule}")
+
+
+def print_checkout_checkpoint(params, tables, state, checkout, ledger) -> None:
+    """The modules 08-12 checkpoint: funnel, calibration, leakage-relevant state."""
+    rule = "=" * 78
+    sessions = tables["fct_checkout_session"]
+    n = len(sessions)
+
+    print(f"\n{rule}\nCHECKPOINT — modules 08-12 (checkout funnel)\n{rule}")
+
+    print("\n1. ROW COUNTS")
+    for name in ("fct_checkout_session", "fct_customer_state_at_session",
+                 "fct_payment_attempt", "fct_checkout_event", "truth_order_probability"):
+        print(f"   {name:<32} {len(tables[name]):>9,}")
+    orders = int((~sessions["checkout_abandoned"]).sum())
+    print(f"   {'converted sessions (-> orders)':<32} {orders:>9,}")
+    print(f"   {'events per session':<32} "
+          f"{len(tables['fct_checkout_event']) / n:>9.2f}")
+
+    print("\n2. JOINT SOLVE  (beta_0 and alpha_0 are interdependent)")
+    for calibration in (checkout.conversion_calibration, checkout.cod_calibration):
+        mark = "PASS" if calibration.converged else "FAIL"
+        print(f"   [{mark}] {calibration.describe()}")
+    print(f"   final-pass drift: beta_0 {checkout.solve_drift['beta_0']:.2e}, "
+          f"alpha_0 {checkout.solve_drift['alpha_0']:.2e}")
+
+    print("\n3. CALIBRATION TARGETS")
+    targets = params.require("calibration_targets")
+    rows = [
+        ("CAL-01 COD share of orders", checkout.cod_share, targets["cod_share"]),
+        ("CAL-06 checkout conversion", checkout.conversion_rate,
+         targets["checkout_conversion"]),
+        ("CAL-07 % of COD from payment failure", checkout.switch_cod_share_of_cod,
+         targets["pct_cod_from_payment_failure"]),
+    ]
+    for name, actual, target in rows:
+        lo = float(target["target"]) - float(target["tol"])
+        hi = float(target["target"]) + float(target["tol"])
+        ok = lo <= actual <= hi
+        print(f"   [{'PASS' if ok else 'FAIL'}] {name:<38} {actual:.4f}  "
+              f"target {float(target['target']):.3f} +/-{float(target['tol']):.3f}  "
+              f"({target['severity']})")
+
+    print("\n4. FUNNEL  (Branch-5 diagnosis)")
+    for step, share in checkout.abandon_breakdown.items():
+        note = ""
+        if step == "FEE_REVEAL" and share == 0:
+            note = "  <- 0 by design: baseline shipping_fee_charged = 0"
+        print(f"   abandoned at {step:<16} {share:>7.2%}{note}")
+    print(f"   converted{'':<20} {checkout.conversion_rate:>7.2%}")
+    print(f"   switch-COD share of all orders  {checkout.switch_cod_share_of_orders:>7.2%}"
+          f"   (spec 10.3 expects ~4.2%)")
+
+    print("\n5. POINT-IN-TIME STATE  (decision A18: no imputation)")
+    null_cod = state["pit_cod_share"].isna().mean()
+    print(f"   pit_cod_share NULL                {null_cod:>7.2%}  "
+          f"(= sessions with no prior order)")
+    print(f"   pit_has_history TRUE              {state['pit_has_history'].mean():>7.2%}")
+    print(f"   pit_rto_rate_shrunk NULL          "
+          f"{state['pit_rto_rate_shrunk'].isna().mean():>7.2%}  (never NULL by design)")
+    print(f"   pit_is_new_customer TRUE          {state['pit_is_new_customer'].mean():>7.2%}")
+    tiers = state["pit_risk_tier_rule_based"].value_counts(normalize=True)
+    print("   rule tier mix                     "
+          + "  ".join(f"{t} {tiers.get(t, 0):.1%}" for t in ("LOW", "MED", "HIGH")))
+
+    print("\n6. LK-06  (shrinkage prior is the declared constant)")
+    lk06 = lk_06_shrinkage_prior_is_declared(
+        float(params.require("priors.rto_prior")),
+        float(params.require("priors.shrinkage_k")),
+        params,
+    )
+    print(f"   [{lk06.status.value}] {lk06.actual}")
+
+    print("\n7. CAL-09  (slope immutability)")
+    cal09 = cal_09_no_slope_changed(ledger, params, require_complete_coverage=False)
+    print(f"   [{cal09.status.value}] {cal09.actual}")
+
+    print(f"\n{rule}")
+    print("PROVISIONAL: modules 13-17 do not exist, so no in-window order resolves.")
+    print("Every pit_* value reflects PRE-WINDOW history only. When the A1 day loop")
+    print("closes, pit_cod_share and pit_rto_rate_shrunk gain in-window history and")
+    print("BOTH intercepts must be re-solved. These are working numbers, not a")
+    print("calibration.")
+    print(rule)
 
 
 if __name__ == "__main__":

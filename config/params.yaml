@@ -191,6 +191,65 @@ distributions:
     # in-window behaviour tied to a live payment session. Documented, not silent.
     model_switch_to_cod: false
 
+  # ===========================================================================
+  # [A28 - PROPOSED, NOT YET APPROVED]  Modules 08-12.
+  # Same status as the A27 block above: required by the spec, never quantified
+  # by it. Listed in decision_register.md A28 with rationale.
+  # ===========================================================================
+
+  # Module 08 - fct_checkout_session.
+  session:
+    # Sessions are allocated uniformly at random across customers, so the
+    # per-customer count is ~Poisson(sessions/customers). Repeat-visit
+    # propensity is NOT latent-driven: no Phase 1 hypothesis involves visit
+    # frequency, and making it latent-driven would add a second, unasked-for
+    # path from latent_intent into the point-in-time features.
+    allocation: uniform_over_customers
+    # Most sessions ship to the customer's home cluster.
+    away_geography_rate: 0.06
+    # Address quality. Drawn INDEPENDENTLY of tier and of every latent: spec 3.6
+    # lists no drivers, and geography's access channel is already carried by
+    # serviceability_score. Keeping it independent also keeps the cheapest
+    # intervention lever clean - if address quality were a tier proxy, the
+    # "fix addresses" recommendation would silently become a geography policy.
+    address_completeness: {dist: beta, a: 6.5, b: 2.2}    # mean ~0.747
+    est_delivery_days_noise_sd: 0.9
+    # Single-line orders (spec 1.5). cart_size is the optionality proxy;
+    # quantity is how many units of the ONE ordered product.
+    quantity_weights: {1: 0.90, 2: 0.075, 3: 0.025}       # mean 1.125
+    # Relative session volume by hour, local time. Evening-heavy.
+    hour_of_day_weights: [0.6, 0.4, 0.3, 0.2, 0.2, 0.3, 0.5, 0.8,
+                          1.0, 1.2, 1.3, 1.3, 1.2, 1.1, 1.1, 1.2,
+                          1.4, 1.6, 1.9, 2.2, 2.3, 2.0, 1.5, 1.0]
+    # discount_pct: product base discount, nudged by deal-seeking, plus noise.
+    # Spec 12.2 names these drivers but gives no magnitudes.
+    discount_price_sensitivity_weight: 0.012              # per z-unit
+    discount_noise_sd: 0.020
+    discount_bounds: {lo: 0.0, hi: 0.60}
+
+  # Module 09 - pit_risk_tier_rule_based. Decision A21: the M1 (pre-selection)
+  # baseline uses PRIOR RTO + TENURE only. payment_method belongs to the M2
+  # baseline on fct_order and must not appear in a Stage-2 feature.
+  # The HIGH cut sits at the break-even RTO probability from blueprint 6.6, so
+  # the rule baseline and the economic threshold agree by construction.
+  risk_tier_rules:
+    high_rto_rate_shrunk: 0.257            # p*, the break-even RTO probability
+    med_rto_rate_shrunk: 0.165             # the population blended rate
+    med_if_new_customer: true
+
+  # Modules 11a / 11b - the two conversion hurdles (decision A26).
+  conversion:
+    # One logit gives p_convert; it is split across the two hurdles as
+    #   p_address = p_convert ** s      p_payment_page = p_convert ** (1 - s)
+    # so the product is exactly p_convert by construction. s is the share of
+    # log-survival attributed to the address step. Payment-page-weighted,
+    # because that is where real checkouts shed most traffic.
+    address_hurdle_share: 0.35
+    # Outer loop: alpha_0 (conversion) and beta_0 (COD) are interdependent --
+    # payment failure removes sessions, and who fails depends on prepaid intent.
+    # Solve them alternately until both are stable.
+    joint_solve_passes: 3
+
   # Centring constants used by the logits. Reference points, not slopes.
   centering:
     seller_rating_center: 4.30

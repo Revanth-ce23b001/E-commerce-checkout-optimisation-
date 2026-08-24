@@ -541,7 +541,7 @@ Outstanding: the generation-order tables in `docs/` when modules 08+ are written
 
 ---
 
-### A27 - Distributions the spec requires but never quantified · **OPEN — needs sign-off**
+### A27 - Distributions the spec requires but never quantified · **APPROVED 2026-08-24**
 
 Modules 02-07 could not run without these, and they are almost certainly what the
 never-recorded "A24 — 13 distributional/structural gaps" was pointing at. They are written
@@ -563,74 +563,199 @@ ratings, volume seasonality — not the relationships the project measures. The 
 downstream reach is `geography.cod_cultural_index`, because it enters the COD logit at +0.30;
 its tier ordering is the load-bearing choice there and is flagged above.
 
-**They still need sign-off.** Requesting a ruling.
+**Approved 2026-08-24.** The `[A27 PROPOSED]` tags stay in `params.yaml` as provenance:
+they mark values that came from this register rather than from the source spec.
+
+---
+
+### A28 - Distributions for modules 08-12 · **OPEN — needs sign-off**
+
+Same status and same pattern as A27: required by the spec, never quantified by it. Written
+into `params.yaml` under `distributions.*` tagged **`[A28 PROPOSED]`**.
+
+| Block | What it sets | Why this value |
+|---|---|---|
+| `session.allocation` | Sessions allocated uniformly across customers | Repeat-visit propensity is **not** latent-driven. No Phase 1 hypothesis involves visit frequency, and making it latent-driven would open a second, unasked-for path from `latent_intent` into the point-in-time features — quietly strengthening the confounding beyond what was planted. |
+| `session.address_completeness` | Beta(6.5, 2.2), mean ~0.747 | Drawn **independently of tier and of every latent**. Spec 3.6 names no drivers; geography's access channel is already `serviceability_score`. Keeping it independent also keeps the cheapest intervention lever clean — if address quality were a tier proxy, "fix the addresses" would silently become a geography policy. |
+| `session.quantity_weights` | {1: 0.90, 2: 0.075, 3: 0.025}, mean 1.125 | Single-line orders (spec 1.5). Heavily weighted to 1 so `gmv = list_price x quantity` stays near the pinned mean. See A29. |
+| `session.hour_of_day_weights` | 24 relative weights, evening-heavy | Feeds the bank-downtime clustering, which needs a real hour distribution to cluster against. |
+| `session.away_geography_rate` | 0.06 | Most sessions ship home; some are gifts, travel, work addresses. |
+| `session.discount_*` | Price-sensitivity weight 0.012/z, noise sd 0.020 | Spec 12.2 names deal-seeking selection as a driver of `discount_pct` but gives no magnitude. Deliberately small: this is selection into promotions, not a pricing model. |
+| `risk_tier_rules` | HIGH at 0.257, MED at 0.165 | The HIGH cut is **p\***, the break-even RTO probability from blueprint 6.6, so the rule baseline and the economic threshold agree by construction rather than by coincidence. |
+| `conversion.address_hurdle_share` | 0.35 | Payment-page-weighted, because that is where real checkouts shed most traffic. The split is exact — `p_address x p_payment == p_convert` — so it costs no accuracy. |
+| `conversion.joint_solve_passes` | 3 | beta_0 and alpha_0 are interdependent; see the build status for the observed drift. |
+
+None of these feeds a planted causal coefficient. **Requesting a ruling.**
+
+---
+
+### A29 - `order_value` is Stage-2 SAFE but depends on Stage-3 `quantity` · **RESOLVED — spec amendment needed**
+
+**Problem.** Spec 4.2 lists `order_value` as a **Stage-2 SAFE** risk feature — knowable before
+payment-method selection. But 3.10 defines `order_value = gmv - discount_amount` with
+`gmv = list_price x quantity`, and marks `quantity` **Stage 3**. A Stage-2 column cannot
+depend on a Stage-3 one. One of the two markings has to move.
+
+**Decision.** `quantity` moves to **Stage 2** and is drawn in module 08. It is a cart
+attribute — the customer chose how many units before reaching the payment page — so Stage 2
+is where it actually belongs. `order_value` then becomes genuinely Stage-2 and its use in
+both the COD logit and the risk model is legitimate.
+
+**Consequence that had to be fixed immediately.** `category_mean_gmv` is the target mean
+**GMV per order** (decision A5). With `gmv = list_price x quantity` and E[quantity] = 1.125,
+drawing list prices at the GMV target overshoots mean GMV by 12.5% — about **₹125 against
+EC-01's ±₹25 tolerance**. Module 05 therefore divides the category means by E[quantity].
+That is implementing A5 correctly, not changing it.
+
+**Specification change required.** 3.10: `quantity` availability Stage 3 -> Stage 2.
+
+---
+
+### A30 - `pit_avg_order_value` has no pre-window source · **RESOLVED — limitation recorded**
+
+**Problem.** `pit_avg_order_value` is a listed SAFE feature, but `dim_customer` (spec 3.5) has
+no pre-window order-value column, so there is nothing to average for a customer whose only
+history predates the window.
+
+**Decision.** It builds from **in-window orders only** and is NULL until the customer has
+one. Consistent with decision A18: unknown is unknown.
+
+**Rejected alternative.** Inventing a `pre_window_avg_order_value` column would add a schema
+field the spec does not have, and drawing pre-window order values purely to average them
+would be an unflagged assumption feeding a model feature.
+
+**Limitation to record in `docs/05_limitations.md`.** The feature is weaker than the data
+dictionary implies, and it is NULL for most sessions early in the window. It carries no
+coefficient in either 7.2 or 8.2, so no planted relationship is affected — but an analyst
+reading the dictionary would not expect the sparsity.
+
+---
+
+### A31 - VOL-01, VOL-02 and CAL-06 are jointly knife-edge · **OPEN — needs ruling**
+
+**Problem, verified arithmetically at full scale.** Three HARD tests interact:
+
+| Test | Requirement |
+|---|---|
+| VOL-01 | `fct_order` >= 100,000 |
+| VOL-02 | session count in [145,000, 150,000] |
+| CAL-06 | conversion 68.0% +/- 2.0pp, i.e. [66.0%, 70.0%] |
+
+Session count today is `target_orders / checkout_conversion_target` = **147,059**. At that
+count, VOL-01 needs conversion >= **exactly 68.00%** — the midpoint of CAL-06's band. **Any
+conversion below 68.00% fails VOL-01, even though CAL-06 explicitly permits it.**
+
+This is not hypothetical. The realised conversion is **0.6762**, comfortably inside CAL-06
+(error −0.38pp against a ±2.0pp tolerance), and it produces **99,441 orders — VOL-01 fails.**
+
+**Feasibility.**
+
+| Conversion | Sessions needed for VOL-01 | Within VOL-02 cap? |
+|---:|---:|---|
+| 0.6600 (CAL-06 floor) | 151,516 | ❌ exceeds 150,000 |
+| 0.6667 | 149,993 | ✅ just fits |
+| 0.6762 (realised) | 147,886 | ✅ |
+| 0.6800 | 147,059 | ✅ |
+
+So there is a **jointly infeasible sliver**: any conversion in **[66.00%, 66.67%)** satisfies
+CAL-06 and cannot satisfy VOL-01 and VOL-02 together at any session count.
+
+**Recommended option.** Set the session count to the **top of the VOL-02 band, 150,000**,
+instead of deriving it from the conversion midpoint. That makes VOL-01 hold for any
+conversion >= 66.67%, covering all but the bottom 0.67pp of CAL-06's band, and at the
+realised 0.6762 it yields **101,430 orders**. Then either narrow CAL-06 to [66.7%, 70.0%] or
+document the residual sliver as a known joint constraint.
+
+**Rejected: raising `target_orders` or tightening CAL-06 to force it.** Conversion is
+emergent from seven fixed slopes and one calibrated intercept. Tuning anything to make three
+mutually-constraining HARD tests agree is exactly the failure mode CAL-09 exists to prevent.
+
+**Not fixed unilaterally** — the session count is an invariant in CLAUDE.md
+(~147,059 sessions), so changing it needs a ruling.
 
 ---
 
 ## Build status
 
-**Stage 2 complete. Modules 02-07 built and checkpointed. Modules 08+ not started.**
+**Stage 2 complete. Generation modules 02-12 built and checkpointed. 13-23 not started.**
 
 | Component | Status |
 |---|---|
-| Dependency verification on Python 3.14 | ✅ All 11 packages import cleanly |
-| Repo hygiene, `docs/` canonical paths, `.gitignore` | ✅ |
-| Project skeleton, `pyproject.toml`, `Makefile` | ✅ |
-| Seed substream harness + independence checkpoint | ✅ |
-| Config loader (schema-validate, SHA-256, DGP-hash guard) | ✅ |
-| Logit assembler + coefficient ledger | ✅ |
-| Shrinkage helper | ✅ |
-| `config/params.yaml` + `params.schema.json` | ✅ all rulings applied, schema-validated |
-| `config/scenarios/dev_small.yaml` | ✅ scale only — not one coefficient changed |
-| `sql/00_schema_analytics.sql` (12 tables) | ✅ parses clean — ⚠️ never executed, no PostgreSQL |
-| `sql/01_schema_truth.sql` (2 tables + REVOKE) | ✅ parses clean — ⚠️ never executed |
-| DDL dry-run (`scripts/02_load_postgres.py --dry-run`) | ✅ 34/34 statements parse |
-| **CAL-09** slope immutability — five blocks | ✅ |
-| **CAL-10** reason-weight immutability | ✅ ACTIVE, hash frozen at `35774eca…` |
-| **CAL-11** selection-share gate (A7) | ✅ implemented + tested both directions |
-| **LK-06** declared shrinkage prior (A19) | ✅ implemented + tested both directions |
-| **DQ-07a / 07b / 07c** (A9) | 📋 specified; implementation waits for modules 13-20 |
-| **02** `dim_date` | ✅ |
-| **03** `dim_geography` | ✅ |
-| **04** `dim_seller` | ✅ |
-| **05** `dim_product` | ✅ |
-| **06** `dim_customer` + `truth_customer_latent` | ✅ |
-| **07** pre-window history + 2 calibrators | ✅ both converged |
-| Modules 08-23 | ⬜ not started |
+| Config loader, seed harness, logit assembler, shrinkage, calibration solver | ✅ |
+| `config/params.yaml` + schema + `dev_small.yaml` | ✅ all rulings applied |
+| `sql/00_schema_analytics.sql` / `01_schema_truth.sql` | ✅ parse clean — ⚠️ never executed, no PostgreSQL |
+| CAL-09 (5 blocks) · CAL-10 · CAL-11 · LK-06 | ✅ implemented and tested |
+| DQ-07a / 07b / 07c | 📋 specified; needs modules 13-20 |
+| **02** dates · **03** geography · **04** sellers · **05** products | ✅ |
+| **06** customers + latents · **07** pre-window history (2 calibrators) | ✅ |
+| **08** sessions · **09** point-in-time state | ✅ |
+| **10** COD intent · **11a/11b** hurdles · **11c** payment attempts · **12** conversion | ✅ |
+| `fct_checkout_event` projection (A12) | ✅ deterministic, no new substream |
+| Modules 13-23 | ⬜ not started |
 
-**110 unit tests, all passing. No full dataset generated.**
+**144 unit tests, all passing.**
 
-### Stage-2 checkpoint result (full scale, seed 20260115)
+### Checkpoint — modules 08-12, full scale, seed 20260115
 
-| Measure | Value |
-|---|---|
-| Pre-window orders drawn | 122,647 across 55,000 customers |
-| `pi_cod0` solved | **+0.5156** → COD share **0.6166** (target 0.620 ±0.020) ✅ |
-| `pi_rto0` solved | **−3.3750** → RTO rate **0.1671** (target 0.165 ±0.020) ✅ |
-| Pre-ship cancel rate | 0.0395 |
-| Customers with no pre-window history | **38.9%** |
+| Table | Rows | Spec §15 expects |
+|---|---:|---|
+| `fct_checkout_session` | 147,059 | 147,059 ✅ |
+| `fct_customer_state_at_session` | 147,059 | 147,059 ✅ |
+| `fct_payment_attempt` | 45,606 | ~78,000 ⚠️ see note |
+| `fct_checkout_event` | 770,207 | ~700,000 ✅ |
+| converted sessions (→ orders) | **99,441** | 100,000 ⚠️ **A31** |
 
-**Latent → history correlations — all seven signs match the planted coefficients:**
+**Joint solve** — beta_0 and alpha_0 are interdependent, so they are solved alternately
+until both stop moving. Final-pass drift on both: **0.00e+00**.
 
-| Latent | vs pre-window COD rate | vs pre-window RTO rate |
-|---|---:|---:|
-| `latent_trust` | −0.377 ✅ | −0.256 ✅ |
-| `latent_liquidity` | −0.430 ✅ | −0.384 ✅ |
-| `latent_intent` | **+0.294** ✅ | **+0.359** ✅ |
-| `latent_price_sensitivity` | +0.133 ✅ | — |
+| Intercept | Solved | Realised | Target |
+|---|---:|---:|---|
+| `alpha_0` (conversion) | **+0.3125** | 0.6762 | 0.680 ±0.004 solver tol ✅ |
+| `beta_0` (COD) | **−0.1875** | 0.6200 | 0.620 ±0.004 solver tol ✅ |
 
-`latent_intent` correlating positively with **both** is the confounding this project
-depends on. Prior COD and prior RTO also correlate positively with each other, which is
-what makes BR-02 and BR-03 detectable later.
+| Test | Actual | Target | |
+|---|---:|---|---|
+| CAL-01 COD share of orders | 0.6200 | 0.620 ±0.010 (HARD) | ✅ |
+| CAL-06 checkout conversion | 0.6762 | 0.680 ±0.020 (HARD) | ✅ |
+| CAL-07 % of COD from payment failure | 0.0575 | 0.068 ±0.020 (SOFT) | ✅ |
+| CAL-09 slope immutability | 45 slopes verified, 5 blocks | exact | ✅ |
+| LK-06 declared shrinkage prior | prior=0.165, k=8 | exact | ✅ |
 
-All brief §9.5 consistency constraints pass with zero violations.
+**Funnel (Branch-5 diagnosis).** ADDRESS 12.68% · PAYMENT_PAGE 18.94% · FEE_REVEAL 0.00% ·
+PAYMENT_FAILURE 0.76% · converted 67.62%. Switch-COD is 3.57% of all orders against spec
+§10.3's ~4.2%.
+
+FEE_REVEAL at exactly zero is **correct, not a bug**: baseline `shipping_fee_charged` is 0,
+so the fee term contributes nothing to the conversion logit. The shipping fee is an
+intervention lever, and FEE_REVEAL is the diagnosis waiting for someone to pull it.
+
+**Point-in-time state (decision A18).** `pit_cod_share` NULL for **38.94%** of sessions —
+those with no prior order — with `pit_has_history` as the missing indicator.
+`pit_rto_rate_shrunk` never NULL, by design. Rule-tier mix LOW 41.0% / MED 51.2% / HIGH 7.8%.
+
+### Note on `fct_payment_attempt` being ~32,000 below spec §15
+
+Spec §15 derives ~78,000 from "prepaid-intent sessions × 1.19 attempts", counting prepaid
+intent across **all** sessions. Under decision A26 only sessions that **reach the payment
+page** can touch a payment rail — a session that abandons at the address step never selects
+a method. Prepaid-intent sessions reaching the payment page are ~38,000, so 45,606 attempts
+is right for the ordering that was approved. Spec §15's row estimate predates A26 and
+should be restated; the ordering is not the thing to change.
 
 ### Open items
 
 | # | Item | Blocks |
 |---|---|---|
-| **A27** | Distribution values for modules 02-07, tagged `[A27 PROPOSED]` | Nothing today — but they are **unapproved** and the data already depends on them |
-| A25 / A26 | Ruled; docs still need the generation-order tables updated | Modules 08+ documentation |
-| A24 | Container item; its 13 sub-items were never recorded | Superseded in practice by A27 |
+| **A31** | VOL-01 / VOL-02 / CAL-06 jointly knife-edge — **99,441 orders, VOL-01 fails** | Needs a ruling before module 13 |
+| **A28** | Distribution values for modules 08-12, tagged `[A28 PROPOSED]` | Nothing today, but the data already depends on them |
+| A29 | `quantity` Stage 3 → Stage 2 | Spec amendment only; already implemented |
+| A30 | `pit_avg_order_value` sparsity | Record in `docs/05_limitations.md` |
+| A25 / A26 | Ruled; generation-order tables in `docs/` still show the old module 11 | Docs |
+| — | `docs/data_generating_process.md` does not exist; A3 and A25 both owe it documentation | Docs |
 
-**Awaiting a ruling on A27 before this data is treated as anything but provisional.**
+### Still provisional
+
+Modules 13-17 do not exist, so **no in-window order resolves** and every `pit_*` value
+reflects pre-window history alone. When the decision-A1 day loop closes, `pit_cod_share` and
+`pit_rto_rate_shrunk` gain in-window history and **all four solved intercepts must be
+re-solved**. The numbers above are a working checkpoint, not a calibration.
