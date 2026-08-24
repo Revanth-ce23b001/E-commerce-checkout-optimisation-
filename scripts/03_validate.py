@@ -140,9 +140,34 @@ def _write_report(params, tables, truth, results, verdict, reason) -> None:
             f"{r.expected} | {r.actual} |"
         )
 
+    env_blocked = {"LK-01", "LK-05", "DQ-01"}
+    skips = [r for r in results.results if r.status is Status.SKIP]
+    if skips:
+        lines += [
+            "", "## 5 — Skipped tests, split by reason", "",
+            "**These are NOT passes and NOT failures.** Nine HARD tests could not run. "
+            "They are split below so that \"9 skipped\" is never read as \"9 unverified\": "
+            "the first group is blocked by this machine, the second is out of scope for "
+            "Phase 2B by design.", "",
+            "### ENVIRONMENT-BLOCKED — need a live PostgreSQL", "",
+        ]
+        for r in [x for x in skips if x.test_id in env_blocked]:
+            lines.append(f"- **{r.test_id}** — {r.name}. {r.detail}")
+        lines += [
+            "", "The DDL parses cleanly (34/34 statements) but has never been applied. "
+            "These three unblock the moment a server exists.", "",
+            "### PHASE-5-DEFERRED — need fitted models, out of scope for Phase 2B", "",
+        ]
+        for r in [x for x in skips if x.test_id not in env_blocked]:
+            lines.append(f"- **{r.test_id}** — {r.name}. {r.detail}")
+        lines += [
+            "", "Phase 2B builds the *dataset*; these test what an analysis recovers "
+            "**from** it. The data and `_truth.json` support every one of them.", "",
+        ]
+
     notes = [r for r in results.results if r.status is not Status.PASS and r.detail]
     if notes:
-        lines += ["", "## 5 — Failures and skips, explained", ""]
+        lines += ["", "## 6 — Every non-passing test, in full", ""]
         for r in notes:
             lines += [f"**{r.test_id} — {r.name}** ({r.status.value})", "", r.detail, ""]
 

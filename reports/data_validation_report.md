@@ -7,9 +7,9 @@ All HARD tests that RAN pass, and 0 SOFT failure(s) — but 9 HARD test(s) could
 ## 1 — Dataset summary
 
 - master seed: `20260115`
-- params sha256: `9f603d19e9ad95f6bb63659f674a9783…`
-- dgp sha256: `3f8129e56079f734abfa2ca6c501823f…`
-- generated: 2026-08-24T17:51:39.696616+00:00
+- params sha256: `55b26c159584ea9736f036cce986021a…`
+- dgp sha256: `a188db118d8b1d46668ea2558abdca06…`
+- generated: 2026-08-24T18:02:36.837912+00:00
 
 | Table | Rows |
 |---|---:|
@@ -72,7 +72,7 @@ Frozen (decision A38):
 | CAL-06 | HARD | PASS | Checkout conversion | 0.68 +/-0.02 | 0.6813 |
 | CAL-07 | SOFT | PASS | % of COD caused by payment failure | 0.068 +/-0.02 | 0.0590 |
 | CAL-08 | SOFT | PASS | Addressable share of RTO cost | 0.65 +/-0.05 | 0.6144 |
-| CAL-09 | HARD | PASS | No slope coefficient differs from params.yaml | exact match on every slope (tolerance 0) | 71 slope(s) verified across 5 block(s) |
+| CAL-09 | HARD | PASS | No slope coefficient differs from params.yaml | exact match on every slope (tolerance 0) | 72 slope(s) verified across 5 block(s) |
 | CAL-10 | HARD | PASS | RTO reason weights frozen | 35774eca8875a357… | 35774eca8875a357… |
 | CAL-11 | HARD | PASS | Selection share of the naive COD-RTO gap | [0.25, 0.45] | 0.436 |
 | EC-01 | HARD | PASS | Mean GMV per order | 1000 +/-25 | 1001.20 |
@@ -125,7 +125,31 @@ Frozen (decision A38):
 | GT-07 | HARD | SKIP | Selection decomposition via PSM | — | not runnable |
 | GT-05 | HARD | PASS | AUC ceiling in band | [0.74, 0.79] | 0.7717 |
 
-## 5 — Failures and skips, explained
+## 5 — Skipped tests, split by reason
+
+**These are NOT passes and NOT failures.** Nine HARD tests could not run. They are split below so that "9 skipped" is never read as "9 unverified": the first group is blocked by this machine, the second is out of scope for Phase 2B by design.
+
+### ENVIRONMENT-BLOCKED — need a live PostgreSQL
+
+- **LK-01** — View columns subset of safe whitelist. Needs a live PostgreSQL to read the view definition. No server on this machine; the DDL parses but was never applied.
+- **LK-05** — analyst role has zero privileges on truth. Needs a live PostgreSQL. sql/01_schema_truth.sql contains the REVOKEs and parses, but has never been applied.
+- **DQ-01** — Reproducibility hash matches manifest. Needs a stored manifest from a prior run. The seed harness and params hash are in place; the first run has nothing to compare to.
+
+The DDL parses cleanly (34/34 statements) but has never been applied. These three unblock the moment a server exists.
+
+### PHASE-5-DEFERRED — need fitted models, out of scope for Phase 2B
+
+- **BR-09** — Delay explains more deviance than promise. Needs a fitted model on attempt_delay_days vs estimated_delivery_days. Phase 5 territory; the data supports it.
+- **GT-01** — Coefficient recovery. Needs a fitted logistic regression on safe features. Phase 5 runs these; the data and truth file support it.
+- **GT-03** — Adjustment closes the gap partially. Needs the confounder-controlled model. The relative rule and its min_gap_closed threshold are in params; Phase 5 evaluates them.
+- **GT-04** — Planted null on review_count holds. Needs the fitted model's CI on log1p(review_count).
+- **GT-06** — H6: delay explains more than promise. Same fitted-model dependency as BR-09.
+- **GT-07** — Selection decomposition via PSM. Needs propensity matching. Phase 5.
+
+Phase 2B builds the *dataset*; these test what an analysis recovers **from** it. The data and `_truth.json` support every one of them.
+
+
+## 6 — Every non-passing test, in full
 
 **BR-09 — Delay explains more deviance than promise** (SKIP)
 

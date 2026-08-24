@@ -1352,6 +1352,30 @@ both landing on the nose.
 
 ---
 
+### A33-amendment - `seller_sla_dispatch_weight` is a NEW coefficient · **RATIFIED at 0.35**
+
+**A correction to the record, and the distinction matters at the end of a build.**
+"Zero slopes moved" is true. "Zero slopes were added" is **not**.
+`seller_sla_dispatch_weight = 0.35` did not exist in the specification or in the approved
+A33 draft. It is a new coefficient.
+
+**Why it exists.** A33 condition (a) required `attempt_delay_days` to derive from *both*
+`courier_reliability_score` **and** `seller_sla_breach_rate`. The draft satisfied only the
+first: transit time scaled with courier reliability, but `dispatch_lag_days` was drawn from
+an independent lognormal. So `seller_dispatch_late` -- the flag delta_3 (+0.25) multiplies --
+had **no relationship to the seller's actual SLA breach rate**, and the Stage-1 coefficient
+`seller_sla_breach_rate = +1.20` and the Stage-2 shock were describing unrelated things.
+delta_3 was effectively noise. That was a gap in the specification, not in the draft.
+
+**Ratified at 0.35** (log-space: a +1sd breach-rate seller dispatches 1.42x slower), and
+**moved into `rto_model.post_dispatch_shock`** so CAL-09 freezes it like every other slope.
+It is recorded in the runtime ledger and verified: CAL-09 passes with five shock terms.
+
+**The closing claim is restated as:** *zero existing slopes moved; one new coefficient added
+under a flagged spec gap.*
+
+---
+
 ## Build status
 
 **Modules 02-21 built. Full validation runs. PHASE 2B EXIT CONDITION MET.**
@@ -1390,7 +1414,8 @@ whenever a HARD test is skipped.
 | support_ndr_base | 9.0000 | NDR mean 18.00 |
 | noise_sd FROZEN | 3.3125 | AUC 0.7717 |
 
-Drift 0.00e+00 on every solved level. Zero slopes moved at any point.
+Drift 0.00e+00 on every solved level. **Zero existing slopes moved; one new
+coefficient added under a flagged spec gap (A33-amendment).**
 
 ### As built
 

@@ -124,7 +124,8 @@ def record_shock_coefficients(params, ledger: CoefficientLedger) -> dict[str, fl
     return {
         name: ledger.record(BLOCK, f"shock.{name}", cfg[name])
         for name in ("courier_reliability_z_neg", "attempt_delay_days",
-                     "seller_dispatch_late", "noise_sd")
+                     "seller_dispatch_late", "noise_sd",
+                     "seller_sla_dispatch_weight")
     }
 
 
@@ -163,6 +164,7 @@ def delivery_timeline(
     seller_sla_breach_z: np.ndarray,
     u_dispatch: np.ndarray,
     u_transit: np.ndarray,
+    sla_dispatch_weight: float,
 ) -> dict[str, np.ndarray]:
     """When the parcel moves, and how late the first attempt is.
 
@@ -187,7 +189,7 @@ def delivery_timeline(
     # would open an unintended path into the outcome.
     dispatch_lag = np.exp(
         float(lag_cfg["mu"])
-        + float(cfg["seller_sla_dispatch_weight"]) * seller_sla_breach_z
+        + sla_dispatch_weight * seller_sla_breach_z
         + float(lag_cfg["sigma"]) * u_dispatch
     )
     seller_dispatch_late = dispatch_lag > float(

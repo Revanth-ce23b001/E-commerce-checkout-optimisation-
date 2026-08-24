@@ -1,9 +1,9 @@
 {
   "run_manifest": {
     "master_seed": 20260115,
-    "params_sha256": "9f603d19e9ad95f6bb63659f674a9783527c1fbf6aee161e91ac4ba91e740d51",
-    "dgp_sha256": "3f8129e56079f734abfa2ca6c501823fa117a949a3890c7870f8aa42a275472a",
-    "generated_at_utc": "2026-08-24T17:51:39.696616+00:00",
+    "params_sha256": "55b26c159584ea9736f036cce986021a5060300fb56a87ac035043bbcb0527bc",
+    "dgp_sha256": "a188db118d8b1d46668ea2558abdca06f2a79ef34e025a12a12176facadc37bf",
+    "generated_at_utc": "2026-08-24T18:02:36.837912+00:00",
     "generator_version": "2.0.0"
   },
   "calibrated_levels": {
@@ -48,6 +48,32 @@
     "breakeven_rto_probability_expected": 0.257,
     "annualization_factor_derived": 227.26196676293736,
     "annualization_factor_expected": 240.0
+  },
+  "hypothesis_ground_truth": {
+    "H2_new_customer_cod_lift_pp": {
+      "prior": "12-18pp",
+      "observed": 22.46,
+      "verdict": "ABOVE PRIOR",
+      "mechanism": "spec 7.2 priced is_new_customer (+0.70) in isolation and ignored that a new customer also escapes log1p_orders_delivered (-0.18) and log1p_prepaid_success (-0.35). See decision A43."
+    },
+    "H3_prior_rto_lift_multiple": {
+      "prior": "2.0-2.5x",
+      "observed": 1.693,
+      "verdict": "BELOW PRIOR",
+      "mechanism": "decision A37 raised post-dispatch noise from 0.85 to 3.3125 to bring the AUC ceiling into GT-05's band, which dilutes every pre-checkout signal including pit_rto_rate_shrunk (+2.80). BR-02 was restated as a CI lower bound under A40."
+    },
+    "H11_pct_cod_from_payment_failure": {
+      "prior": "8-15%",
+      "observed": 0.059,
+      "verdict": "BELOW PRIOR",
+      "mechanism": "parameters come from plausible external PG-failure ranges, not from the prior. Spec 10.3 predicted this. See decision A35."
+    },
+    "H12_achievable_auc_ceiling": {
+      "prior": "0.74-0.79",
+      "observed": 0.7717,
+      "verdict": "IN PRIOR",
+      "mechanism": "noise_sd was CALIBRATED against this target (A37) and then frozen (A38), so it is a solved value rather than an independent confirmation."
+    }
   },
   "coefficient_ledger": {
     "cod_model": {
@@ -116,7 +142,8 @@
       "shock.courier_reliability_z_neg": 0.4,
       "shock.attempt_delay_days": 0.22,
       "shock.seller_dispatch_late": 0.25,
-      "shock.noise_sd": 3.3125
+      "shock.noise_sd": 3.3125,
+      "shock.seller_sla_dispatch_weight": 0.35
     },
     "conversion_model": {
       "log_order_value": -0.18,

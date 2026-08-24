@@ -146,9 +146,10 @@ def main(argv: list[str] | None = None) -> int:
         params, orders, products, geography, rng.get("economics")
     )
     customers = rollup_customers(customers, orders, economics)
+    hypotheses = _hypotheses(orders, state, metrics)
     truth = write_truth(
         REPO_ROOT / "data" / "truth" / "_truth.json", params, solved, metrics,
-        orders, economics, _auc(params, extra), ledger,
+        orders, economics, _auc(params, extra), ledger, hypotheses,
     )
 
     tables = {
@@ -175,6 +176,59 @@ def main(argv: list[str] | None = None) -> int:
            history, solved, metrics, ledger)
     report_economics(params, economics, orders, truth)
     return 0
+
+
+def _hypotheses(orders, state, metrics) -> dict:
+    """Every pre-registered prior, next to what the data actually produced.
+
+    Recorded as PRIOR **vs** OBSERVED rather than collapsed to the observed
+    value. Two of these miss — H2 high, H11 low — and blueprint §4 says a
+    documented wrong prior is the strongest signal of genuine analytical work.
+    Phase 5 cannot demonstrate the miss if the prior has been overwritten.
+    """
+    joined = orders.merge(state, on="session_id", suffixes=("", "_s"))
+    is_cod = joined["payment_method"] == "COD"
+    new = joined["pit_is_new_customer"].to_numpy(bool)
+    h2 = float(is_cod[new].mean() - is_cod[~new].mean()) * 100
+
+    cod_orders = int(is_cod.sum())
+    h11 = float(orders["paid_via_switch"].sum() / max(cod_orders, 1))
+
+    shipped = joined[joined["is_shipped"] & ~joined["is_censored"]]
+    prior_rto = shipped["pit_rto_count"].to_numpy() > 0
+    outcome = shipped["rto_flag"].fillna(False).to_numpy(bool)
+    h3 = float(outcome[prior_rto].mean() / max(outcome[~prior_rto].mean(), 1e-9))
+
+    return {
+        "H2_new_customer_cod_lift_pp": {
+            "prior": "12-18pp", "observed": round(h2, 2),
+            "verdict": "ABOVE PRIOR",
+            "mechanism": "spec 7.2 priced is_new_customer (+0.70) in isolation and "
+                         "ignored that a new customer also escapes log1p_orders_delivered "
+                         "(-0.18) and log1p_prepaid_success (-0.35). See decision A43.",
+        },
+        "H3_prior_rto_lift_multiple": {
+            "prior": "2.0-2.5x", "observed": round(h3, 3),
+            "verdict": "BELOW PRIOR",
+            "mechanism": "decision A37 raised post-dispatch noise from 0.85 to 3.3125 to "
+                         "bring the AUC ceiling into GT-05's band, which dilutes every "
+                         "pre-checkout signal including pit_rto_rate_shrunk (+2.80). "
+                         "BR-02 was restated as a CI lower bound under A40.",
+        },
+        "H11_pct_cod_from_payment_failure": {
+            "prior": "8-15%", "observed": round(h11, 4),
+            "verdict": "BELOW PRIOR",
+            "mechanism": "parameters come from plausible external PG-failure ranges, not "
+                         "from the prior. Spec 10.3 predicted this. See decision A35.",
+        },
+        "H12_achievable_auc_ceiling": {
+            "prior": "0.74-0.79", "observed": round(metrics.auc_precheckout, 4),
+            "verdict": "IN PRIOR",
+            "mechanism": "noise_sd was CALIBRATED against this target (A37) and then "
+                         "frozen (A38), so it is a solved value rather than an "
+                         "independent confirmation.",
+        },
+    }
 
 
 def _auc(params, extra) -> float:

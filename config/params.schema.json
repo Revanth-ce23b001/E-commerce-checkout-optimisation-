@@ -658,7 +658,8 @@
             "attempt_delay_days",
             "seller_dispatch_late",
             "noise_sd",
-            "noise_sd_spec_value"
+            "noise_sd_spec_value",
+            "seller_sla_dispatch_weight"
           ],
           "properties": {
             "courier_reliability_z_neg": {
@@ -679,6 +680,10 @@
               "description": "Decision A37/A38: solved once, then FROZEN. Immutable and covered by CAL-09.",
               "type": "number",
               "exclusiveMinimum": 0
+            },
+            "seller_sla_dispatch_weight": {
+              "description": "A33-amendment. New coefficient, frozen by CAL-09.",
+              "type": "number"
             }
           }
         }

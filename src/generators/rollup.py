@@ -94,6 +94,7 @@ def write_truth(
     economics: pd.DataFrame,
     auc_ceiling: float,
     ledger=None,
+    hypotheses: dict | None = None,
 ) -> dict:
     """Module 21 — ``_truth.json``. The DERIVED figures are the authority.
 
@@ -170,6 +171,10 @@ def write_truth(
                 params.require("scale.annualization_factor_expected")
             ),
         },
+        # PRIOR vs OBSERVED, never collapsed to the observed value. Phase 1 §4
+        # asked for documented wrong priors; Phase 5 has to be able to SHOW the
+        # miss, which it cannot do if the prior has been overwritten.
+        "hypothesis_ground_truth": hypotheses or {},
         # The runtime record of every coefficient consumed. Persisted so the
         # standalone validation run can perform a REAL CAL-09 rather than
         # comparing params.yaml to a copy of itself.

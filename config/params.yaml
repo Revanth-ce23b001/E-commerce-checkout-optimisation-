@@ -314,13 +314,6 @@ distributions:
     transit_multiplier_mean: 1.00
     transit_multiplier_sd: 0.28
     courier_reliability_transit_weight: 0.45   # per z-unit, NEGATIVE reliability
-    # A33 condition (a). Dispatch lag must depend on the SELLER's SLA breach rate,
-    # or delta_3 (seller_dispatch_late) has nothing to bite on and the Stage-1
-    # seller_sla_breach_rate coefficient (+1.20) and the Stage-2 shock would be
-    # describing unrelated things. In log-space, so a +1sd breach-rate seller
-    # dispatches exp(0.35) = 1.42x slower.
-    # Seller-level only -- never customer-level (condition (c)).
-    seller_sla_dispatch_weight: 0.35
     attempt_gap_days: 2                        # between failed delivery attempts
     rto_initiation_days: 2                     # final failed attempt -> RTO_INITIATED
     rto_return_days: {dist: lognormal, mu: 1.35, sigma: 0.40}
@@ -470,6 +463,14 @@ rto_model:
     courier_reliability_z_neg: 0.40        # delta_1
     attempt_delay_days: 0.22               # delta_2 - decision A8: RENAMED
     seller_dispatch_late: 0.25             # delta_3
+    # A33-amendment. A NEW COEFFICIENT, not one that existed and moved.
+    # Condition (a) required attempt_delay_days to derive from BOTH courier
+    # reliability and seller SLA breach; the draft only had the first, so delta_3
+    # was multiplying a flag with no relationship to seller_sla_breach_rate.
+    # In log-space: a +1sd breach-rate seller dispatches exp(0.35) = 1.42x slower.
+    # Seller-level only -- nothing customer-level enters (condition (c)).
+    # Lives HERE, in the shock block, so CAL-09 freezes it like every other slope.
+    seller_sla_dispatch_weight: 0.35
     # Decision A37 - the SEVENTH calibrated level. Spec 13.2 annotates this
     # "the AUC ceiling lever" and GT-05 states the ceiling as a TARGET, so it is
     # calibrated against its declared purpose rather than picked.

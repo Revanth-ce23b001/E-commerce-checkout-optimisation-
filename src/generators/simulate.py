@@ -291,6 +291,7 @@ def simulate_window(setup: dict, alpha0: float, beta0: float, gamma0: float,
                 ctx["base_delivery_days"][ord_pos], courier_z,
                 _z_of(ctx["seller_sla_breach_rate"], ord_pos),
                 d["u_dispatch"][ord_pos], d["u_transit"][ord_pos],
+                setup["shock_coef"]["seller_sla_dispatch_weight"],
             )
             shock = rto_mod.post_dispatch_shock(
                 setup["shock_coef"], courier_z, timeline["attempt_delay_days"],
