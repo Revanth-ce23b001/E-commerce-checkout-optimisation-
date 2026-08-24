@@ -314,6 +314,13 @@ distributions:
     transit_multiplier_mean: 1.00
     transit_multiplier_sd: 0.28
     courier_reliability_transit_weight: 0.45   # per z-unit, NEGATIVE reliability
+    # A33 condition (a). Dispatch lag must depend on the SELLER's SLA breach rate,
+    # or delta_3 (seller_dispatch_late) has nothing to bite on and the Stage-1
+    # seller_sla_breach_rate coefficient (+1.20) and the Stage-2 shock would be
+    # describing unrelated things. In log-space, so a +1sd breach-rate seller
+    # dispatches exp(0.35) = 1.42x slower.
+    # Seller-level only -- never customer-level (condition (c)).
+    seller_sla_dispatch_weight: 0.35
     attempt_gap_days: 2                        # between failed delivery attempts
     rto_initiation_days: 2                     # final failed attempt -> RTO_INITIATED
     rto_return_days: {dist: lognormal, mu: 1.35, sigma: 0.40}
@@ -747,6 +754,19 @@ censoring:
 priors:
   rto_prior: 0.165                         # EB prior mean for pit_rto_rate_shrunk
   cod_prior: 0.620
+  # Decision A39 follow-on. pit_payment_failure_rate is failures / (successes +
+  # failures), so its implied population mean is NOT the blended first-attempt
+  # failure rate but that rate divided by (1 + itself):
+  #     blended = sum(rail_mix[r] * first_attempt_failure[r]) = 0.1603
+  #     prior   = 0.1603 / 1.1603                             = 0.1382
+  # Derived ANALYTICALLY from the payment_failure block, never measured from the
+  # generated population -- LK-06 asserts it at runtime.
+  #
+  # Leaving this un-centred put a historyless customer at "has never had a
+  # payment fail", which is a positively-biased claim about a customer we know
+  # nothing about, and it double-counted against is_new_customer -- the exact
+  # mechanism that broke BR-01.
+  payment_failure_prior: 0.1382
   shrinkage_k: 8                           # spec 3.7
 
 # -----------------------------------------------------------------------------

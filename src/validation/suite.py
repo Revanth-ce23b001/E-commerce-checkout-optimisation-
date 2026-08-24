@@ -450,6 +450,7 @@ def _lk(results, params, tables, truth, ledger, extra) -> None:
         float(params.require("priors.rto_prior")),
         float(params.require("priors.shrinkage_k")), params,
         float(params.require("priors.cod_prior")),
+        float(params.require("priors.payment_failure_prior")),
     ))
 
 

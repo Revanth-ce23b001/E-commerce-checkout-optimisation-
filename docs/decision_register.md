@@ -744,7 +744,7 @@ since 60 × 4 = 240 encoded the same 100,000-order assumption.
 
 ---
 
-### A33 - Distributions for modules 13-17 · **OPEN — needs sign-off**
+### A33 - Distributions for modules 13-17 · **RESOLVED — approved with three conditions**
 
 Same status and pattern as A27 / A28. Tagged `[A33 PROPOSED]` in `params.yaml` under
 `distributions.delivery`.
@@ -757,7 +757,30 @@ Same status and pattern as A27 / A28. Tagged `[A33 PROPOSED]` in `params.yaml` u
 | `rto_return_days: LogN(1.35, 0.40)` | The return leg, ~4 days median. |
 | `risk_tier_rules.m2_cod_escalates_one_tier` | The **third** rule of blueprint §9.3's baseline ("payment method + prior RTO + tenure"). It belongs to M2 only and must never touch the Stage-2 tier (decision A21). |
 
-**Requesting a ruling.**
+**Approved with three conditions. Condition (a) contradicted what was drafted, and is
+flagged here rather than silently reconciled.**
+
+**(a) `attempt_delay_days` must derive from `courier_reliability_score` AND
+`seller_sla_breach_rate`.** ⚠️ **The draft only satisfied half of this.** Transit time
+depended on courier reliability, but `dispatch_lag_days` was drawn from an independent
+lognormal — so `seller_dispatch_late`, which δ₃ multiplies, had **no relationship to the
+seller's actual SLA breach rate**. That meant the Stage-1 coefficient
+`seller_sla_breach_rate = +1.20` and the Stage-2 δ₃ = +0.25 were describing unrelated
+things, and δ₃ was effectively noise.
+
+Fixed: dispatch lag now scales with the seller's z-scored SLA breach rate through a new
+`seller_sla_dispatch_weight: 0.35` (log-space, so a +1sd breach-rate seller dispatches
+1.42× slower). That parameter is *new* — required by the condition, not in the approved
+draft — and is flagged as such.
+
+**(b) `delivery_attempts` capped at 3, and an RTO must always exhaust the cap.** Already
+true in the draft; now **asserted** rather than assumed. It is load-bearing: the NDR base
+of 9.0 lands the realised mean on the Phase 1 registry value of ₹18 *only* because attempts
+is exactly 3 on every RTO, so a silent drift here would quietly move EC-05 and EC-06.
+
+**(c) `dispatch_lag_days` independent of anything customer-level.** Satisfied. The new
+dependency is on a **seller** attribute; no customer trait enters, so no unintended path
+into the outcome is opened.
 
 ---
 
@@ -1256,13 +1279,86 @@ stored per order, so the unprofitable-if-delivered population can be sliced dire
 
 ---
 
+### A39 follow-on - `payment_failure_rate` centred; the inventory is now closed · **RULED · IMPLEMENTED**
+
+`pit_payment_failure_rate` was the last history-derived rate entering a logit un-centred.
+Now `(pit_payment_failure_rate − payment_failure_prior)`.
+
+**The constant is derived analytically, not measured.** The feature is
+`failures / (successes + failures)`, so its implied population mean is *not* the blended
+first-attempt failure rate but that rate over one plus itself:
+
+```
+blended = sum(rail_mix[r] * first_attempt_failure[r]) = 0.160300
+prior   = 0.160300 / 1.160300                        = 0.138154  ->  declared 0.1382
+```
+
+Un-centred, it placed a historyless customer at *has never had a payment fail* — a
+positively-biased claim about someone we know nothing about, and one that double-counted
+against `is_new_customer`. LK-06 now asserts all three centring constants at runtime.
+
+**Full inventory of every logit term, so this is closed once.**
+
+| Class | Terms | Reference point |
+|---|---|---|
+| **HISTORY-RATE** (can be NULL) | `pit_cod_share` (both blocks), `pit_rto_rate_shrunk`, `payment_failure_rate` | **All four centred on declared priors** |
+| COUNT | `log1p_prepaid_success`, `log1p_orders_delivered` | Zero is the *true* value for a historyless customer, not a missing one |
+| Z-SCORED | the four latents, `cod_cultural_index_z`, `serviceability_z` | Centred by construction |
+| CENTRED | ratings, `est_delivery_days`, `discount_pct`, `log1p_review_count` | Spec §7.2/§8.2 reference points |
+| SCALED | `log_order_value`, `log_order_value_sq` | `log(value / 1000)` |
+| ALWAYS-OBSERVED | `address_completeness`, `seller_sla_breach_rate` | Never NULL, so no reference point needed |
+| INDICATOR / CATEGORICAL | the rest | 0/1 or per-level |
+
+**`pit_avg_order_value` and `pit_days_since_last_order` carry NO slope in any of the three
+models** — verified programmatically against `params.yaml`, not by inspection. They are
+columns only, so neither can be affected. Every declared coefficient is classified and no
+un-centred history rate remains.
+
+**Result: BR-01 +6.96pp → +22.46pp.** See A43.
+
+---
+
+### A43 - BR-01 now OVERSHOOTS H2's pre-registered prior · **FINDING, not a defect**
+
+BR-01 passes its ≥+10pp floor comfortably at **+22.46pp** (new 0.7925 vs established
+0.5679). But Phase 1's H2 pre-registered a **12–18pp** band, and the dataset is above it.
+
+**Why, and it is the same class of arithmetic slip as the A38 shrink figure.** Spec §7.2
+says `is_new_customer = +0.70` *"yields ≈ +14pp for new vs established, inside the 12–18pp
+prior"*. That counts the coefficient **in isolation**. It ignores that a new customer also
+*escapes* two tenure penalties which every established customer pays:
+
+| Term | Mean among established | Contribution they pay, and a new customer does not |
+|---|---:|---:|
+| `log1p_orders_delivered` × −0.18 | 1.322 | **−0.238** |
+| `log1p_prepaid_success` × −0.35 | 0.743 | **−0.260** |
+| `payment_failure_rate` centring | — | +0.152 *(works the other way)* |
+| `is_new_customer` | — | **+0.700** |
+| **net logit differential** | | **+1.046** |
+
+At the realised COD base rate, `dp/dlogit = p(1−p) = 0.235`, so +1.046 × 0.235 ≈ **+24.6pp**
+predicted against **+22.46pp** observed. The structure explains it.
+
+**No action taken, and none recommended.** BR-01 is a floor test and passes. H2's 12–18pp
+is a *pre-registered prior*, and a prior the data misses is a result — the same status as
+H11 undershooting its 8–15% band (A35), just in the other direction. Moving a slope to land
+inside the prior would be reverse-engineering the conclusion, which CAL-09 exists to
+prevent.
+
+**For the write-up:** H2 is *directionally confirmed and larger than hypothesised* — new
+customers are ~22pp more COD-inclined, not ~14pp. Two of the project's pre-registered
+priors now miss in opposite directions (H2 high, H11 low), which is a better outcome than
+both landing on the nose.
+
+---
+
 ## Build status
 
-**Modules 02-21 built. Full validation suite runs. Verdict: CONDITIONAL.**
+**Modules 02-21 built. Full validation runs. PHASE 2B EXIT CONDITION MET.**
 
 **146 unit tests passing.**
 
-### Validation — 65 tests, full scale, seed 20260115
+### Validation - 65 tests, full scale, seed 20260115
 
 | Family | Result |
 |---|---|
@@ -1274,48 +1370,55 @@ stored per order, so the unprofitable-if-delivered population can be sliced dire
 | DQ | 15 pass, 1 skip |
 | GT | 2 pass, 5 skip |
 
-**56 pass · 0 HARD fail · 0 SOFT fail · 9 skip → VERDICT: CONDITIONAL**
+**56 pass · 0 HARD fail · 0 SOFT fail · 9 skip -> VERDICT: CONDITIONAL**
 
-The verdict rule was extended beyond spec 18: **a skipped HARD test caps the verdict at
-CONDITIONAL**. The spec assumed every test runs. Nine do not - three need a live PostgreSQL
-or a prior manifest (LK-01, LK-05, DQ-01) and six need a fitted model that belongs to
-Phase 5 (BR-09, GT-01/03/04/06/07). Reporting READY with those un-run would have been a
-quietly-wrong claim of exactly the kind this project exists to avoid.
+The nine skips are environmental or Phase-5, never counted as passes:
+LK-01, LK-05, DQ-01 need a live PostgreSQL or a prior manifest; BR-09 and
+GT-01/03/04/06/07 need a fitted model. The verdict rule caps at CONDITIONAL
+whenever a HARD test is skipped.
 
-### The six calibrated levels, plus one frozen
+### Calibrated levels
 
 | Level | Solved | Realised |
 |---|---:|---:|
-| `product_price_scalar` | 1.039062 | mean GMV 1001.17 |
-| `alpha_0` conversion | +0.281250 | 0.6813 |
-| `beta_0` COD | +0.750000 | 0.6175 |
-| `gamma_0` RTO | -4.687500 | 0.1624 blended |
-| `pi_cod0` pre-window | +0.515625 | 0.6166 |
-| `pi_rto0` pre-window | -3.375000 | 0.1671 |
-| `support_ndr_base` | 9.0000 | NDR mean 18.00 |
-| **`noise_sd` FROZEN** | **3.3125** | AUC 0.7720 |
+| product_price_scalar | 1.039062 | mean GMV 1001.20 |
+| alpha_0 conversion | +0.281250 | 0.6813 |
+| beta_0 COD | +0.875000 | 0.6233 |
+| gamma_0 RTO | -4.687500 | 0.1653 blended |
+| pi_cod0 pre-window | +0.515625 | 0.6166 |
+| pi_rto0 pre-window | -3.375000 | 0.1671 |
+| support_ndr_base | 9.0000 | NDR mean 18.00 |
+| noise_sd FROZEN | 3.3125 | AUC 0.7717 |
 
-Drift 0.00e+00 on every solved level.
+Drift 0.00e+00 on every solved level. Zero slopes moved at any point.
 
-### The planted structure, as built
+### As built
 
 | Quantity | As built | Spec prose (superseded) |
 |---|---:|---:|
-| naive COD-prepaid gap | **17.47pp** | 19.9pp |
-| AME (canonical, A6) | **9.94pp** | ~13.4pp |
-| selection share (CAL-11 gate) | **0.431** | 0.327 |
-| AUC ceiling (GT-05) | **0.7720** | - |
-| annualised RTO exposure | **164.9 Cr** | 164.1 Cr |
-| derived annualisation factor | **227.28** | 240 |
+| naive COD-prepaid gap | 17.73pp | 19.9pp |
+| AME (canonical, A6) | 9.99pp | ~13.4pp |
+| selection share (CAL-11 gate) | 0.436 | 0.327 |
+| AUC ceiling (GT-05) | 0.7717 | - |
+| annualised RTO exposure | 167.8 Cr | 164.1 Cr |
+| orders | 105,605 | 100,000 |
 
-The naive estimate is **1.76x the truth**. The spec prose figures belong to
- (limitation L8); everything downstream quotes `_truth.json`.
+The naive estimate is 1.77x the truth. Downstream reads data/truth/_truth.json.
 
-### Open items
+### Two pre-registered priors miss, in opposite directions
 
-| # | Item |
+| Hypothesis | Prior | As built | |
+|---|---|---:|---|
+| H2 new-customer COD lift | 12-18pp | 22.46pp | above (A43) |
+| H11 COD from payment friction | 8-15% | 5.90% | below (A35) |
+
+Both are results, not defects. Neither was tuned toward its prior.
+
+### Remaining
+
+| Item | Status |
 |---|---|
-| A39 follow-on | `cod_model.payment_failure_rate` is the one remaining un-centred history rate (+1.10 x 0.175 = +0.19). Flagged, not changed. |
-| A33 | `[A33 PROPOSED]` delivery distributions still unapproved |
-| - | Modules 22-23 (PostgreSQL load, report rendering) not built; no server available |
-| - | `docs/data_generating_process.md` still absent |
+| Modules 22-23 (PostgreSQL load, report render) | not built; no server available |
+| LK-01, LK-05, DQ-01 | unblock with a PostgreSQL instance |
+| BR-09, GT-01/03/04/06/07 | Phase 5, need fitted models |
+| docs/data_generating_process.md | still absent |

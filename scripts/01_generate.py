@@ -360,7 +360,7 @@ def report(params, setup, tables, history, solved, m, ledger) -> None:
     print("\n9. GUARDS")
     print(f"   [{cal_09_no_slope_changed(ledger, params, require_complete_coverage=False).status.value}]"
           f" CAL-09 slope immutability")
-    print(f"   [{lk_06_shrinkage_prior_is_declared(float(params.require('priors.rto_prior')), float(params.require('priors.shrinkage_k')), params, float(params.require('priors.cod_prior'))).status.value}]"
+    print(f"   [{lk_06_shrinkage_prior_is_declared(float(params.require('priors.rto_prior')), float(params.require('priors.shrinkage_k')), params, float(params.require('priors.cod_prior')), float(params.require('priors.payment_failure_prior'))).status.value}]"
           f" LK-06 declared shrinkage prior")
     geo_corr = address_tier_correlation(tables)
     print(f"   [INFO] corr(address_completeness, geo_tier rank) = {geo_corr:+.4f}"

@@ -1316,7 +1316,8 @@
       "required": [
         "rto_prior",
         "cod_prior",
-        "shrinkage_k"
+        "shrinkage_k",
+        "payment_failure_prior"
       ],
       "properties": {
         "rto_prior": {
@@ -1332,6 +1333,12 @@
         "shrinkage_k": {
           "type": "number",
           "exclusiveMinimum": 0
+        },
+        "payment_failure_prior": {
+          "description": "Decision A39 follow-on. Declared centring constant, derived analytically from payment_failure, never measured.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
         }
       }
     },

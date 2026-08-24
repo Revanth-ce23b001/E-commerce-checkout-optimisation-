@@ -54,6 +54,7 @@ def prepare(params, sessions, customers, latents, products, sellers, geography,
         # Decision A39 centring constants. DECLARED, never computed from the
         # generated population -- LK-06 asserts both at runtime.
         "cod_prior": float(params.require("priors.cod_prior")),
+        "payment_failure_prior": float(params.require("priors.payment_failure_prior")),
         "k": float(params.require("priors.shrinkage_k")),
         "address_share": float(params.require("distributions.conversion.address_hurdle_share")),
         "tier_rules": params.require("distributions.risk_tier_rules"),
@@ -188,7 +189,7 @@ def simulate_window(setup: dict, alpha0: float, beta0: float, gamma0: float,
                 + pred.cod_dynamic(
                     setup["cod_dyn"], pit["cod_share"], pit["prepaid_success"],
                     pit["is_new"], pit["delivered"], pit["payment_failure_rate"],
-                    setup["cod_prior"],
+                    setup["cod_prior"], setup["payment_failure_prior"],
                 )
             )
             cod_intent = d["u_cod"][positions] < logistic(cod_logit)
@@ -288,6 +289,7 @@ def simulate_window(setup: dict, alpha0: float, beta0: float, gamma0: float,
                 p, order_day,
                 ctx["estimated_delivery_days"][ord_pos],
                 ctx["base_delivery_days"][ord_pos], courier_z,
+                _z_of(ctx["seller_sla_breach_rate"], ord_pos),
                 d["u_dispatch"][ord_pos], d["u_transit"][ord_pos],
             )
             shock = rto_mod.post_dispatch_shock(

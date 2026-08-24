@@ -235,6 +235,7 @@ def cod_dynamic(
     orders_delivered: np.ndarray,
     payment_failure_rate: np.ndarray,
     cod_prior: float,
+    payment_failure_prior: float,
 ) -> np.ndarray:
     """The COD terms that move as history accumulates.
 
@@ -251,7 +252,8 @@ def cod_dynamic(
         + coefficients["log1p_prepaid_success"] * np.log1p(prepaid_success)
         + coefficients["is_new_customer"] * is_new.astype(np.float64)
         + coefficients["log1p_orders_delivered"] * np.log1p(orders_delivered)
-        + coefficients["payment_failure_rate"] * np.nan_to_num(payment_failure_rate, nan=0.0)
+        + coefficients["payment_failure_rate"]
+        * np.nan_to_num(payment_failure_rate - payment_failure_prior, nan=0.0)
     )
 
 

@@ -1,13 +1,13 @@
 {
   "run_manifest": {
     "master_seed": 20260115,
-    "params_sha256": "e85ccf6f8ee74a42b53091053b1a2b95785d7e3c11e9eab74deb82383c6c9126",
-    "dgp_sha256": "aeb6a23def1fcce7aa64a76f3774a4e0b74991f51a98aa8fb5300f997dbdea7a",
-    "generated_at_utc": "2026-08-24T17:25:39.232409+00:00",
+    "params_sha256": "9f603d19e9ad95f6bb63659f674a9783527c1fbf6aee161e91ac4ba91e740d51",
+    "dgp_sha256": "3f8129e56079f734abfa2ca6c501823fa117a949a3890c7870f8aa42a275472a",
+    "generated_at_utc": "2026-08-24T17:51:39.696616+00:00",
     "generator_version": "2.0.0"
   },
   "calibrated_levels": {
-    "cod_model_beta0": 0.75,
+    "cod_model_beta0": 0.875,
     "rto_model_gamma0": -4.6875,
     "conversion_model_alpha0": 0.28125,
     "pre_window_cod_pi0": 0.515625,
@@ -23,10 +23,10 @@
     "cod_on_rto": {
       "logit_coefficient": 1.6,
       "odds_ratio": 4.953032424395115,
-      "average_marginal_effect_pp": 9.938457331356597,
-      "naive_observed_gap_pp": 17.469908019643235,
-      "selection_share_of_naive_gap": 0.43110992226279865,
-      "naive_over_truth_multiple": 1.7578088265795873,
+      "average_marginal_effect_pp": 9.992323058669193,
+      "naive_observed_gap_pp": 17.732568542515438,
+      "selection_share_of_naive_gap": 0.4364988335044811,
+      "naive_over_truth_multiple": 1.7746192190144334,
       "spec_prose_values_superseded": {
         "marginal_effect_pp": 13.4,
         "naive_gap_pp": 19.9,
@@ -39,14 +39,14 @@
     }
   },
   "economics_targets": {
-    "mean_gmv_per_order": 1001.1680036852965,
-    "mean_order_value_per_order": 919.7037538582713,
-    "cod_delivered_cm": 110.08465188397689,
-    "cod_rto_cash_loss": -317.01017978052766,
-    "cod_rto_economic_cost": -424.1942197836407,
-    "breakeven_rto_probability_derived": 0.2577522454555282,
+    "mean_gmv_per_order": 1001.2003211229344,
+    "mean_order_value_per_order": 919.7361739523163,
+    "cod_delivered_cm": 109.93028796175977,
+    "cod_rto_cash_loss": -316.8327118902439,
+    "cod_rto_economic_cost": -423.5385830792683,
+    "breakeven_rto_probability_derived": 0.2575909532923011,
     "breakeven_rto_probability_expected": 0.257,
-    "annualization_factor_derived": 227.2791840677292,
+    "annualization_factor_derived": 227.26196676293736,
     "annualization_factor_expected": 240.0
   },
   "coefficient_ledger": {
@@ -129,12 +129,12 @@
     }
   },
   "achieved": {
-    "n_orders": 105597,
-    "cod_share": 0.6175175431120202,
-    "checkout_conversion": 0.6812709677419355,
-    "rto_rate_blended": 0.16240710134299444,
-    "rto_rate_cod_emergent": 0.2305290919855751,
-    "rto_rate_prepaid_emergent": 0.055830011789142764,
-    "auc_ceiling_precheckout": 0.7719717586765995
+    "n_orders": 105605,
+    "cod_share": 0.6233322285876616,
+    "checkout_conversion": 0.6813225806451613,
+    "rto_rate_blended": 0.1653041095890411,
+    "rto_rate_cod_emergent": 0.23338551302120392,
+    "rto_rate_prepaid_emergent": 0.05605982759604955,
+    "auc_ceiling_precheckout": 0.771713235942878
   }
 }

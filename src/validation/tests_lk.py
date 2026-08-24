@@ -38,6 +38,7 @@ from src.validation.result import ResultSet, Severity, Status, TestResult
 PRIORS_BLOCK = "priors"
 RTO_PRIOR_KEY = "rto_prior"
 COD_PRIOR_KEY = "cod_prior"
+PAYMENT_PRIOR_KEY = "payment_failure_prior"
 SHRINKAGE_K_KEY = "shrinkage_k"
 
 
@@ -46,6 +47,7 @@ def lk_06_shrinkage_prior_is_declared(
     k_used_at_runtime: float,
     params: Any,
     cod_prior_used_at_runtime: float | None = None,
+    payment_prior_used_at_runtime: float | None = None,
 ) -> TestResult:
     """LK-06 (HARD) — every declared prior used at runtime matches params.yaml.
 
@@ -68,8 +70,15 @@ def lk_06_shrinkage_prior_is_declared(
     declared_prior = float(params.get(f"{PRIORS_BLOCK}.{RTO_PRIOR_KEY}"))
     declared_k = float(params.get(f"{PRIORS_BLOCK}.{SHRINKAGE_K_KEY}"))
     declared_cod = float(params.get(f"{PRIORS_BLOCK}.{COD_PRIOR_KEY}"))
+    declared_payment = float(params.get(f"{PRIORS_BLOCK}.{PAYMENT_PRIOR_KEY}"))
 
     problems: list[str] = []
+    if (payment_prior_used_at_runtime is not None
+            and float(payment_prior_used_at_runtime) != declared_payment):
+        problems.append(
+            f"payment_failure_prior: params.yaml declares {declared_payment!r}, "
+            f"generator used {float(payment_prior_used_at_runtime)!r}"
+        )
     # Decision A39 made both priors CENTRING constants in the generator's logits
     # as well as the shrinkage prior, which widens what this test has to protect:
     # a centring constant computed from the generated population would shift every
@@ -96,10 +105,10 @@ def lk_06_shrinkage_prior_is_declared(
         name="Shrinkage prior is a declared constant, not computed from the data",
         severity=Severity.HARD,
         status=Status.PASS if not problems else Status.FAIL,
-        expected=f"rto_prior={declared_prior}, cod_prior={declared_cod}, "
-                 f"k={declared_k} (exact)",
-        actual=(f"rto_prior={float(prior_used_at_runtime)}, "
-                f"cod_prior={cod_prior_used_at_runtime}, k={float(k_used_at_runtime)}"),
+        expected=f"rto={declared_prior}, cod={declared_cod}, "
+                 f"payment={declared_payment}, k={declared_k} (exact)",
+        actual=(f"rto={float(prior_used_at_runtime)}, cod={cod_prior_used_at_runtime}, "
+                f"payment={payment_prior_used_at_runtime}, k={float(k_used_at_runtime)}"),
         delta="identical" if not problems else "DIFFERS",
         detail=(
             ""

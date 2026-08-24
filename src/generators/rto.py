@@ -160,6 +160,7 @@ def delivery_timeline(
     estimated_delivery_days: np.ndarray,
     base_delivery_days: np.ndarray,
     courier_reliability_z: np.ndarray,
+    seller_sla_breach_z: np.ndarray,
     u_dispatch: np.ndarray,
     u_transit: np.ndarray,
 ) -> dict[str, np.ndarray]:
@@ -177,8 +178,17 @@ def delivery_timeline(
     cfg = params.require("distributions.delivery")
     lag_cfg = params.require("fulfilment.dispatch_lag_days")
 
+    # A33 condition (a): dispatch lag depends on the SELLER's SLA breach rate, so
+    # delta_3 has something real to bite on. Without it, the Stage-1
+    # seller_sla_breach_rate coefficient (+1.20) and the Stage-2
+    # seller_dispatch_late shock would describe unrelated things and the shock
+    # would collapse toward pure noise.
+    # Condition (c): seller-level only. Nothing customer-level enters here, which
+    # would open an unintended path into the outcome.
     dispatch_lag = np.exp(
-        float(lag_cfg["mu"]) + float(lag_cfg["sigma"]) * u_dispatch
+        float(lag_cfg["mu"])
+        + float(cfg["seller_sla_dispatch_weight"]) * seller_sla_breach_z
+        + float(lag_cfg["sigma"]) * u_dispatch
     )
     seller_dispatch_late = dispatch_lag > float(
         params.require("fulfilment.seller_dispatch_late_threshold_days")
@@ -251,6 +261,17 @@ def resolve_outcomes(
     delivery_attempts = np.where(
         ~rto_flag & (timeline["attempt_delay_days"] > 0), 2, delivery_attempts
     )
+    # A33 condition (b): an RTO is BY DEFINITION an order that exhausted every
+    # attempt. Asserted, not assumed -- the NDR base of 9.0 lands the realised
+    # mean on the Phase 1 registry value of 18 only because attempts is exactly 3
+    # on every RTO, so a silent drift here would quietly move EC-05 and EC-06.
+    if rto_flag.any() and int(delivery_attempts[rto_flag].min()) != max_attempts:
+        raise ValueError(
+            f"An RTO order has fewer than {max_attempts} delivery attempts. An RTO "
+            "is by definition an order that exhausted the cap (A33 condition b)."
+        )
+    if int(delivery_attempts.max()) > max_attempts:
+        raise ValueError(f"delivery_attempts exceeds max_delivery_attempts={max_attempts}.")
 
     return {
         "days_to_resolve": days_to_resolve,
