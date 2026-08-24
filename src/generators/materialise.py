@@ -62,7 +62,8 @@ def resolve_sessions(params, sessions: pd.DataFrame, extra: dict) -> pd.DataFram
     return frame
 
 
-def build_state(params, sessions: pd.DataFrame, extra: dict) -> pd.DataFrame:
+def build_state(params, sessions: pd.DataFrame, extra: dict,
+                dates: pd.DataFrame) -> pd.DataFrame:
     """``fct_customer_state_at_session`` from the loop's per-session capture."""
     rules = params.require("distributions.risk_tier_rules")
     placed = extra["pit_placed"].astype(np.int64)
@@ -89,7 +90,16 @@ def build_state(params, sessions: pd.DataFrame, extra: dict) -> pd.DataFrame:
         "pit_prepaid_success_count": success,
         "pit_payment_failure_count": failures,
         "pit_payment_failure_rate": _rate(failures, attempts),
-        "pit_avg_order_value": np.nan,       # decision A30 / limitation L2
+        # Decision A30 / limitation L2: in-window orders only, so NULL until a
+        # customer places their first one. It was previously hardcoded to NaN,
+        # which made the column permanently empty rather than merely sparse.
+        "pit_avg_order_value": np.round(extra["pit_avg_order_value"], 2),
+        # Same defect class as pit_avg_order_value: the day loop collects
+        # pit_last_order_day and nothing consumed it, so the column reached the
+        # schema permanently NULL -- and it is a WHITELISTED risk-model feature
+        # (params.yaml leakage_guard, sql/04 line 70). Phase 3 would have trained
+        # on a column of nulls. Both sides are day indices into dim_date.
+        "pit_days_since_last_order": _days_since(sessions, extra, dates),
         "pit_has_history": placed > 0,
         "pit_is_new_customer": extra["pit_new"].astype(bool),
         "pit_has_clean_record": (delivered >= 3) & (rto == 0),
@@ -112,7 +122,7 @@ def build_state(params, sessions: pd.DataFrame, extra: dict) -> pd.DataFrame:
 
 
 def build_orders(params, sessions: pd.DataFrame, extra: dict,
-                 dates: pd.DataFrame) -> pd.DataFrame:
+                 dates: pd.DataFrame, products: pd.DataFrame) -> pd.DataFrame:
     """``fct_order`` — one row per converted session (spec §3.10)."""
     converted = extra["converted"]
     idx = np.flatnonzero(converted)
@@ -145,13 +155,26 @@ def build_orders(params, sessions: pd.DataFrame, extra: dict,
         "session_id": sessions["session_id"].to_numpy()[idx],
         "customer_id": sessions["customer_id"].to_numpy()[idx],
         "product_id": sessions["candidate_product_id"].to_numpy()[idx],
+        # Denormalised from dim_product (spec 3.10). The live load caught its
+        # absence: it is NOT NULL and a foreign key, so the COPY column list
+        # silently shifted and the first row failed.
+        "seller_id": products.set_index("product_id")["seller_id"]
+            .reindex(sessions["candidate_product_id"].to_numpy()[idx]).to_numpy(),
         "delivery_geography_id": sessions["delivery_geography_id"].to_numpy()[idx],
         "order_ts": sessions["session_start_ts"].to_numpy()[idx],
         "order_date": order_date,
         "quantity": sessions["quantity"].to_numpy()[idx],
         "gmv": sessions["prospective_gmv"].to_numpy()[idx],
+        # order_value = gmv - discount_amount is a CHECK constraint, so the
+        # rupee amount has to be stored, not just the rate.
+        "discount_amount": np.round(
+            sessions["prospective_gmv"].to_numpy()[idx]
+            - sessions["order_value"].to_numpy()[idx], 2),
         "discount_pct": sessions["discount_pct"].to_numpy()[idx],
         "order_value": sessions["order_value"].to_numpy()[idx],
+        # Both zero in the baseline. cod_fee_charged is the INTERVENTION LEVER.
+        "shipping_fee_charged": float(params.require("economics.shipping_fee_charged")),
+        "cod_fee_charged": float(params.require("economics.cod_fee_charged")),
         "payment_method": np.where(extra["is_cod_order"][idx], "COD", "PREPAID"),
         # DQ-13: NULL if and only if the order is COD. The DDL enforces the same
         # thing as a CHECK, and the economics module reads it to pick the PG rate.
@@ -195,6 +218,19 @@ def build_payment_attempts(params, sessions: pd.DataFrame, extra: dict, rng):
         switched_rail=extra["switched_rail"].astype(bool),
     )
     return materialise_attempts(params, sessions, outcome, rng)
+
+
+def _days_since(sessions: pd.DataFrame, extra: dict, dates: pd.DataFrame):
+    """Session day index minus the customer's last in-window order day.
+
+    NULL until the customer's first in-window order (decision A30 / limitation
+    L2), which is the same convention pit_avg_order_value follows.
+    """
+    positions = {value: index for index, value in enumerate(dates["date_id"])}
+    session_day = np.array([positions[value] for value in sessions["date_id"]],
+                           dtype=float)
+    gap = session_day - extra["pit_last_order_day"]
+    return pd.array(np.where(np.isnan(gap), np.nan, gap), dtype="Int64")
 
 
 def _order_ids(converted: np.ndarray) -> np.ndarray:

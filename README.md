@@ -10,20 +10,32 @@ A dataset where the obvious analysis produces the obvious right answer is a fail
 
 ## Status
 
-**Phase 2B — generation modules 02–12 built and checkpointed.**
+**Phase 2B complete and database-verified** — tag `phase2b-verified`.
 
-Dimensions, latents, pre-window history, sessions, point-in-time state and the full checkout
-funnel exist. Four intercepts solve cleanly: COD share lands on 0.6200 and conversion on
-0.6762. Modules 13–23 (orders, cancellations, RTO, economics) are not started.
+105,605 orders across 155,000 checkout sessions, loaded into PostgreSQL and
+checked against the live schema.
 
-Open, both needing a ruling:
+| | |
+|---|---|
+| Validation | **65 tests · 59 pass · 0 HARD fail · 0 SOFT fail · 6 skip** |
+| The 6 skips | All Phase-5-deferred (need fitted models). **Zero environment-blocked** |
+| Load | 14 tables, 2,022,081 rows, every parquet count matching the server exactly |
+| Leakage firewall | LK-05 verified by connecting **as the `analyst` role** and having both `truth` reads refused with SQLSTATE 42501 |
+| Referential integrity | 21 foreign keys, 0 orphans · 102 CHECK predicates, 0 violations |
+| Reproducibility | DQ-01: regenerated from the same seed, `fct_order` content hash identical |
 
-- **A31** — VOL-01 (≥100,000 orders), VOL-02 (145–150k sessions) and CAL-06 (68% ±2pp) are
-  jointly knife-edge. The realised conversion sits comfortably inside CAL-06 and still
-  produces **99,441 orders**, so VOL-01 fails.
-- **A28** — distribution values for modules 08–12, tagged `[A28 PROPOSED]`.
+Verdict is 🟡 CONDITIONAL rather than 🟢 solely because six HARD tests need a
+fitted model, which is Phase 5's job. Every one is listed with its reason in
+`reports/data_validation_report.md` §5 and `docs/limitations.md`.
 
-See `docs/decision_register.md`.
+Applying the DDL to real rows for the first time found **six defects** that
+neither the 42 data-validation tests nor the 146 unit tests had caught — see
+decision **A44**. The load now runs a pre-flight that blocks on any declared
+column that is absent from the frame or entirely NULL.
+
+One open item needs a ruling: `logit_cod_components` and `logit_rto_components`
+are declared JSONB and are entirely NULL (limitation **L12**). It is a registered
+gap, printed on every load, not a hidden one.
 
 ## Source of truth
 
@@ -89,6 +101,49 @@ failures with the offending statement. It catches structural errors at zero cost
 **not** catch semantic ones — a missing referenced table, a duplicate constraint name, a
 cross-table type mismatch — and it cannot verify the REVOKE grants, which is LK-05 and needs
 a live server. A clean dry-run means "this will parse", not "this will apply".
+
+## PostgreSQL
+
+Needed for the load (module 22) and for the three tests that cannot run without a
+server: **LK-01** (view column list), **LK-05** (role grants) and **DQ-01**
+(reproducibility).
+
+```bash
+docker run -d --name rto-postgres \
+  -e POSTGRES_PASSWORD=<password> -e POSTGRES_DB=checkout_rto \
+  -p 5434:5432 postgres:16-alpine
+```
+
+Copy `config/database.env.example` to `config/database.env` and fill in the
+password. That file is gitignored; the example is not.
+
+```bash
+python scripts/02_load_postgres.py --dry-run   # parse the DDL, no server needed
+python scripts/02_load_postgres.py --force     # drop, recreate, COPY all 14 tables
+python scripts/04_verify_database.py           # LK-01, LK-05, DQ-01, constraints
+```
+
+### Windows: Hyper-V reserves TCP ports silently
+
+With Hyper-V or WSL2 enabled, Windows reserves large blocks of TCP ports. Binding
+one fails with a message that reads like a permissions problem rather than a
+reservation:
+
+```
+bind: An attempt was made to access a socket in a way forbidden by its
+access permissions.
+```
+
+During this build **55432, 5433 and 5432 were all unavailable** and 5434 worked —
+which is why the default `PGPORT` is 5434 rather than the conventional 5432. The
+reserved ranges change across reboots. To list them:
+
+```powershell
+netsh interface ipv4 show excludedportrange protocol=tcp
+```
+
+Pick a port outside every excluded range. This is not a Docker fault and retrying
+will not help.
 
 ## Key invariants
 

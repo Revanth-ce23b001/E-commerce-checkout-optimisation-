@@ -1,0 +1,9 @@
+{
+  "master_seed": 20260115,
+  "params_sha256": "55b26c159584ea9736f036cce986021a5060300fb56a87ac035043bbcb0527bc",
+  "dgp_sha256": "a188db118d8b1d46668ea2558abdca06f2a79ef34e025a12a12176facadc37bf",
+  "generator_version": "2.0.0",
+  "fct_order_sha256": "49b066f06ed1fae63fb5ef65c88cbf5c1199f86c9267936d869b590357cd2aee",
+  "n_orders": 105605,
+  "note": "DQ-01 baseline. A manifest compared against the run that wrote it proves nothing; regenerate from the same seed and compare."
+}

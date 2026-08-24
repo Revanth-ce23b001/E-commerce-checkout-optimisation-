@@ -258,3 +258,57 @@ a cost line — it is the counterfactual CM, and the test's exclusion list was
 incomplete. Fixing the test exposed the result.
 
 **Decision.** A42.
+
+---
+
+## L11 — `true_cod_propensity` is NULL for 6% of customers
+
+`truth.truth_customer_latent.true_cod_propensity` is the customer-level mean
+P(COD) across their sessions (spec §3.13). **3,284 of 55,000 customers (6.0%)
+open no checkout session inside the 90-day window**, so that mean has no
+denominator and the column is NULL for them.
+
+This is the same rule as decision A18 and limitation L2: a rate with an empty
+denominator is NULL, never imputed. Imputing the population COD share would have
+invented 3,284 fictitious COD-average customers *inside the truth table* — the
+one place in the project where a fabricated value cannot be caught by anything
+downstream, because the truth table is what everything else is checked against.
+
+The `NOT NULL` originally written on this column was wrong and was removed. Spec
+§3.13 declares the type only.
+
+**Consequence for Phase 3+.** Any analysis joining `truth_customer_latent` to a
+customer-level population must decide explicitly whether it means *all customers*
+or *customers who shopped*. The two differ by 6%, and an inner join silently
+picks the second.
+
+---
+
+## L12 — The per-term logit traces are not produced
+
+`truth_order_probability.logit_cod_components` and `logit_rto_components` are
+declared JSONB in the schema (spec §3.13: "every additive term in the logit, by
+name") and are **entirely NULL** in the built dataset.
+
+The day loop assembles each logit in two halves — a static block computed once
+per session, plus a per-day dynamic block — because it runs ~100 times inside the
+calibration solve and a per-term trace would need it to materialise roughly 25
+arrays per session per day. The columns were left NULL rather than filled with
+something that merely resembles a trace.
+
+**This is a registered gap, not a hidden one.** `scripts/02_load_postgres.py`
+blocks the load over any declared column that is entirely NULL; these two are the
+single entry in its `KNOWN_EMPTY` exception list, so every load prints them.
+
+**What is not lost.** Every coefficient is still recorded, by name and by block,
+in the runtime `CoefficientLedger` and persisted into `data/truth/_truth.json`
+(test CAL-09). What is missing is the *per-row* decomposition, which is a
+diagnostic convenience — being able to explain a single order's score — not an
+input to any test.
+
+**Open for a ruling.** Populating them is mechanical (`LogitAssembler.
+component_rows()` already exists and is written for exactly this) but would add
+roughly 190 MB across 155,000 rows × 2 columns. The alternatives are: populate
+them, populate them for a documented sample, or drop the two columns from the
+DDL. Shipping a declared-but-empty column indefinitely is the worst of the three.
+

@@ -67,8 +67,8 @@ def built():
     resolved = materialise.resolve_sessions(params, sessions, extra)
     resolved["signup_date"] = customers.set_index("customer_id")["signup_date"]\
         .reindex(resolved["customer_id"]).to_numpy()
-    state = materialise.build_state(params, resolved, extra)
-    orders = materialise.build_orders(params, resolved, extra, dates)
+    state = materialise.build_state(params, resolved, extra, dates)
+    orders = materialise.build_orders(params, resolved, extra, dates, products)
 
     return {
         "params": params, "setup": setup, "metrics": metrics, "extra": extra,

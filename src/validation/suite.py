@@ -19,7 +19,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from pathlib import Path
+
+from src.validation.dataset_hash import order_hash
 from src.validation.result import ResultSet, Severity, Status, TestResult
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _r(test_id, name, severity, ok, expected, actual, detail="") -> TestResult:
@@ -28,6 +33,33 @@ def _r(test_id, name, severity, ok, expected, actual, detail="") -> TestResult:
         status=Status.PASS if ok else Status.FAIL,
         expected=str(expected), actual=str(actual), detail=detail,
     )
+
+
+def _database_check(test_id, name, severity, tables, skip_reason) -> TestResult:
+    """PASS/FAIL from scripts/04_verify_database.py, or SKIP if it never ran.
+
+    The published file carries the hash of the fct_order it ran against. If that
+    does not match the dataset being validated right now, the result is STALE and
+    reports SKIP -- a database check from a previous dataset is not evidence about
+    this one, and quietly accepting it would fabricate a pass.
+    """
+    import json
+
+    path = REPO_ROOT / "reports" / "database_checks.json"
+    if not path.exists():
+        return _skip(test_id, name, severity, skip_reason)
+
+    published = json.loads(path.read_text(encoding="utf-8"))
+    current = order_hash(tables["fct_order"])
+    if published.get("fct_order_sha256") != current:
+        return _skip(test_id, name, severity,
+                     "reports/database_checks.json was written against a DIFFERENT "
+                     "dataset. Re-run scripts/04_verify_database.py against this one.")
+    check = published.get("checks", {}).get(test_id)
+    if check is None:
+        return _skip(test_id, name, severity, skip_reason)
+    return _r(test_id, name, severity, bool(check["passed"]),
+              "enforced", "verified against the live database", check["detail"])
 
 
 def _skip(test_id, name, severity, reason) -> TestResult:
@@ -423,9 +455,10 @@ def _odds_ratio(outcome, group_a, group_b) -> float:
 def _lk(results, params, tables, truth, ledger, extra) -> None:
     from src.validation.tests_lk import lk_06_shrinkage_prior_is_declared
 
-    results.add(_skip("LK-01", "View columns subset of safe whitelist", Severity.HARD,
-                      "Needs a live PostgreSQL to read the view definition. "
-                      "No server on this machine; the DDL parses but was never applied."))
+    results.add(_database_check(
+        "LK-01", "View columns subset of safe whitelist", Severity.HARD, tables,
+        "Needs a live PostgreSQL to read the view definition. Run "
+        "scripts/04_verify_database.py."))
 
     blocked = set(params.require("leakage_guard.hard_blocked"))
     safe = set(params.require("leakage_guard.safe_feature_whitelist"))
@@ -442,9 +475,10 @@ def _lk(results, params, tables, truth, ledger, extra) -> None:
                    "from strictly earlier days, and unit tests re-derive a snapshot "
                    "against a planted unresolved order."))
 
-    results.add(_skip("LK-05", "analyst role has zero privileges on truth", Severity.HARD,
-                      "Needs a live PostgreSQL. sql/01_schema_truth.sql contains the "
-                      "REVOKEs and parses, but has never been applied."))
+    results.add(_database_check(
+        "LK-05", "analyst role has zero privileges on truth", Severity.HARD, tables,
+        "Needs a live PostgreSQL and a real analyst login. Run "
+        "scripts/04_verify_database.py."))
 
     results.add(lk_06_shrinkage_prior_is_declared(
         float(params.require("priors.rto_prior")),
@@ -480,9 +514,10 @@ def _dq(results, params, tables, truth, ledger, extra) -> None:
     economics = tables["fct_order_economics"]
     customers = tables["dim_customer"]
 
-    results.add(_skip("DQ-01", "Reproducibility hash matches manifest", Severity.HARD,
-                      "Needs a stored manifest from a prior run. The seed harness and "
-                      "params hash are in place; the first run has nothing to compare to."))
+    results.add(_database_check(
+        "DQ-01", "Reproducibility hash matches manifest", Severity.HARD, tables,
+        "Needs a manifest from a PRIOR run plus a regeneration to compare against. "
+        "Run scripts/04_verify_database.py --manifest, regenerate, then re-run it."))
 
     dupes = sum(tables[t][k].duplicated().sum() for t, k in (
         ("fct_order", "order_id"), ("fct_checkout_session", "session_id"),

@@ -138,8 +138,8 @@ class ResultSet:
                 "🟡 CONDITIONAL",
                 f"All HARD tests that RAN pass, and {soft} SOFT failure(s) — but "
                 f"{len(skipped)} HARD test(s) could not run and are NOT passes: {ids}. "
-                "They need a live PostgreSQL or a fitted model (Phase 5). Proceed only "
-                "with each one written into docs/limitations.md with a stated reason.",
+                + _skip_cause(skipped) + " Proceed only with each one written into "
+                "docs/limitations.md with a stated reason.",
             )
 
         if soft >= 3:
@@ -149,3 +149,19 @@ class ResultSet:
                 "docs/limitations.md with a stated reason before proceeding.",
             )
         return "🟢 DATASET READY", f"All HARD pass; {soft} SOFT failure(s); nothing skipped."
+
+
+# Which blocker to name depends on what is actually skipped. Saying "needs a live
+# PostgreSQL" once the database checks pass would be a stale claim in the one
+# sentence a reader is most likely to quote.
+_DATABASE_TESTS = {"LK-01", "LK-05", "DQ-01"}
+
+
+def _skip_cause(skipped) -> str:
+    ids = {r.test_id for r in skipped}
+    needs_db = ids & _DATABASE_TESTS
+    if needs_db and ids - _DATABASE_TESTS:
+        return "They need a live PostgreSQL or a fitted model (Phase 5)."
+    if needs_db:
+        return "They need a live PostgreSQL."
+    return "Every one needs a fitted model and belongs to Phase 5."

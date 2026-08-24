@@ -161,7 +161,8 @@ def simulate_window(setup: dict, alpha0: float, beta0: float, gamma0: float,
                      "attempts", "dispatch_lag", "pit_cod_share", "pit_rto_shrunk",
                      "pit_placed", "pit_resolved", "pit_delivered", "pit_rto_count",
                      "pit_cod_orders", "pit_success", "pit_failures", "pit_new",
-                     "pit_last_order_day"):
+                     "pit_last_order_day", "p_convert", "p_cod_intent",
+                     "pit_avg_order_value"):
             collected[name] = np.full(n, np.nan)
         collected["order_tier"] = np.array([None] * n, dtype=object)
         collected["cancel_actor"] = np.array([None] * n, dtype=object)
@@ -228,6 +229,15 @@ def simulate_window(setup: dict, alpha0: float, beta0: float, gamma0: float,
                 ):
                     collected[key][positions] = values
                 collected["pit_last_order_day"][positions] = state.last_order_day[cust]
+                # Decision A30: built from IN-WINDOW orders only, so it is NULL
+                # until a customer places one. The loop already accumulates the
+                # running sum and count; this surfaces them.
+                counts = state.value_count[cust]
+                collected["pit_avg_order_value"][positions] = np.where(
+                    counts > 0, state.value_sum[cust] / np.maximum(counts, 1), np.nan
+                )
+                collected["p_convert"][positions] = p_convert
+                collected["p_cod_intent"][positions] = logistic(cod_logit)
                 collected["cleared_address"][positions] = cleared_addr
                 collected["reached_payment"][positions] = reached
                 collected["cod_intent"][positions] = cod_intent

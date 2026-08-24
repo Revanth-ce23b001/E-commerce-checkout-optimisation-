@@ -74,11 +74,24 @@ there by fixing a censoring bug in the measurement — not by moving a parameter
 
 ---
 
-## 3. Pre-registered priors: three miss, in two directions
+## 3. Pre-registered priors: two independent misses, plus one shared consequence
 
 Blueprint §4: *"nothing signals genuine analytical work more than a documented
-wrong prior."* There are now three, each with a mechanism attached. All are
-recorded as **PRIOR vs OBSERVED** in `_truth.json`, never collapsed to the
+wrong prior."* Three rows below sit outside their prior, but they are **not three
+findings.** Counting them as three overstates the evidence.
+
+**H2 and H11 are genuinely independent misses.** They have unrelated mechanisms
+— an omitted tenure offset in the COD logit, and externally-sourced payment-failure
+parameters — and neither is downstream of the other.
+
+**H3 and the narrowed naive gap are ONE mechanism with two consequences.** Both
+are the A37 noise recalibration: raising post-dispatch `noise_sd` from 0.85 to
+3.3125 dilutes every pre-checkout signal, which simultaneously (a) compresses the
+prior-RTO lift multiple to 1.693×, and (b) narrows the naive COD−prepaid gap to
+17.73pp. Reporting them as two separate surprises would double-count a single
+recalibration. State it as one root cause, two consequences.
+
+All are recorded as **PRIOR vs OBSERVED** in `_truth.json`, never collapsed to the
 observed value, so Phase 5 can show the miss.
 
 | Hypothesis | Prior | Observed | Verdict |
@@ -97,11 +110,13 @@ that a new customer also *escapes* two tenure penalties every established custom
 pays — `log1p_orders_delivered` (−0.238) and `log1p_prepaid_success` (−0.260). Net
 differential +1.046 × p(1−p) = 0.235 predicts +24.6pp against +22.46pp observed.
 
-**H3 (A40).** Decision A37 raised post-dispatch noise from 0.85 to 3.3125 to bring
-the AUC ceiling into GT-05's band. That dilutes every pre-checkout signal,
-`pit_rto_rate_shrunk` (+2.80) included. H3 is the price of a defensible accuracy
-ceiling and a working leakage tripwire — a trade worth making, and one that should
-be stated rather than absorbed.
+**H3 (A40) — not an independent miss.** Decision A37 raised post-dispatch noise
+from 0.85 to 3.3125 to bring the AUC ceiling into GT-05's band. That dilutes every
+pre-checkout signal, `pit_rto_rate_shrunk` (+2.80) included. The narrowed naive gap
+(17.73pp vs a 19.9pp prior) is the **same mechanism, not a second finding** — one
+recalibration, two consequences. H3 is the price of a defensible accuracy ceiling
+and a working leakage tripwire — a trade worth making, and one that should be
+stated rather than absorbed, but stated **once**.
 
 **H11 (A35).** The payment parameters come from plausible external PG-failure
 ranges, not from the prior. Spec §10.3 predicted this. The honest write-up:
@@ -156,18 +171,65 @@ they disagree with the file.**
   in-window order (L2).
 - **Not** that address quality varies by geography. It is drawn independently, by
   deliberate choice, so the address intervention stays cleanly attributable (L1).
-- **Not** that the nine skipped tests passed. Three need PostgreSQL; six need
-  fitted models and are Phase 5's job.
+- **Not** that the AUC gate clears comfortably. The ceiling is **0.7717**, so a
+  fitted M1 should land around **0.74–0.77**. Phase 1 §9.4 gates full risk-based
+  pricing at **0.72**. That clears — but with materially less headroom than the
+  blueprint assumed, because A37's noise increase left `pit_rto_rate_shrunk`
+  weaker than its +2.80 design intent. **If fitted M1 comes in below 0.72, Phase
+  1's own pre-commitment applies: coarse tiers only, reported honestly. Do not
+  tune anything to clear the gate.**
+- **Not** that the six skipped tests passed. They need fitted models and are
+  Phase 5's job.
 
 ---
 
-## 6. Outstanding before Phase 3 opens
+## 6. Database verification (tag `phase2b-verified`)
+
+PostgreSQL 16.15 in Docker. The DDL had parsed cleanly for weeks; **applying it
+to real rows for the first time found six defects that neither the 42
+data-validation tests nor the 146 unit tests had caught** (decision A44). Text
+that has never executed is not a constraint.
+
+| Check | Result |
+|---|---|
+| 14 tables loaded | 2,022,081 rows; **every parquet count matches the server count exactly** |
+| **LK-01** | PASS — all 52 `vw_risk_model_input` columns on the safe whitelist |
+| **LK-05** | PASS — connected **as the `analyst` role**; both `truth` tables refused with **SQLSTATE 42501**; 0 PUBLIC grants on schema `truth`, 0 role memberships, 0 stray `truth_*` tables outside the schema; and `analytics.fct_order` **is** readable (105,605 rows) |
+| **DQ-01** | PASS — manifest written, dataset regenerated from the same seed, `fct_order` content hash identical (`49b066f0…`) |
+| **FK constraints** | PASS — 21 foreign keys anti-joined against the loaded rows, **0 orphans** |
+| **CHECK constraints** | PASS — 102 predicates re-evaluated row by row, **0 violations** |
+
+Two notes on method, because both checks were nearly worthless in their obvious
+form:
+
+- **LK-05 was not verified from `pg_catalog`.** A catalogue query shows what the
+  DDL *intended*. Only a denied `SELECT` from a real login shows what is
+  *enforced*, and the check also covers the two things catalogue inspection
+  misses entirely: `PUBLIC` grants and role inheritance via `pg_auth_members`.
+  The belt-and-braces read of `analytics.fct_order` is there because a role that
+  can read nothing is a broken role, not a working boundary.
+- **The constraints were not verified with `VALIDATE CONSTRAINT`.** A constraint
+  created normally is already marked valid, so `ALTER TABLE … VALIDATE
+  CONSTRAINT` returns success without reading a row. Each constraint is instead
+  turned back into a query — an anti-join per foreign key, `WHERE (predicate) IS
+  FALSE` per check.
+
+**Validation now stands at 65 tests · 59 pass · 0 HARD fail · 0 SOFT fail ·
+6 skip.** All six remaining skips are Phase-5-deferred (need fitted models).
+Zero are environment-blocked.
+
+`scripts/03_validate.py` reads these results from `reports/database_checks.json`
+rather than being told about them, and that file carries the hash of the dataset
+it ran against — a stale file reports SKIP, not a fabricated PASS.
+
+---
+
+## 7. Outstanding before Phase 3 opens
 
 | Item | Blocker |
 |---|---|
-| LK-01, LK-05, DQ-01 | Need a live PostgreSQL. DDL parses 34/34 but was never applied |
-| Modules 22–23 (load, report render) | Same |
 | BR-09, GT-01/03/04/06/07 | Phase 5 — need fitted models |
+| `logit_cod_components` / `logit_rto_components` | Declared JSONB, entirely NULL. Registered gap (L12) — **needs a ruling**: populate, sample, or drop from the DDL |
 | `docs/data_generating_process.md` | Not written; A3, A25 and A26 owe it documentation |
 
-**146 unit tests passing.** Working tree clean at tag `phase2b-complete`.
+**146 unit tests passing.** Working tree clean at tag `phase2b-verified`.

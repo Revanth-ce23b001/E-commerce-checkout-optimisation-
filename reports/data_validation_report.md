@@ -2,14 +2,14 @@
 
 **Verdict: 🟡 CONDITIONAL**
 
-All HARD tests that RAN pass, and 0 SOFT failure(s) — but 9 HARD test(s) could not run and are NOT passes: BR-09, LK-01, LK-05, DQ-01, GT-01, GT-03, GT-04, GT-06, GT-07. They need a live PostgreSQL or a fitted model (Phase 5). Proceed only with each one written into docs/limitations.md with a stated reason.
+All HARD tests that RAN pass, and 0 SOFT failure(s) — but 6 HARD test(s) could not run and are NOT passes: BR-09, GT-01, GT-03, GT-04, GT-06, GT-07. Every one needs a fitted model and belongs to Phase 5. Proceed only with each one written into docs/limitations.md with a stated reason.
 
 ## 1 — Dataset summary
 
 - master seed: `20260115`
 - params sha256: `55b26c159584ea9736f036cce986021a…`
 - dgp sha256: `a188db118d8b1d46668ea2558abdca06…`
-- generated: 2026-08-24T18:02:36.837912+00:00
+- generated: 2026-08-24T20:00:56.662867+00:00
 
 | Table | Rows |
 |---|---:|
@@ -18,14 +18,15 @@ All HARD tests that RAN pass, and 0 SOFT failure(s) — but 9 HARD test(s) could
 | `dim_geography` | 500 |
 | `dim_product` | 8,000 |
 | `dim_seller` | 1,200 |
-| `fct_checkout_event` | 770,207 |
+| `fct_checkout_event` | 814,970 |
 | `fct_checkout_session` | 155,000 |
 | `fct_customer_state_at_session` | 155,000 |
+| `fct_delivery_event` | 362,796 |
 | `fct_order` | 105,605 |
 | `fct_order_economics` | 105,605 |
 | `fct_payment_attempt` | 48,315 |
 | `truth_customer_latent` | 55,000 |
-| `truth_order_probability` | 147,059 |
+| `truth_order_probability` | 155,000 |
 
 ## 2 — Calibrated levels
 
@@ -95,13 +96,13 @@ Frozen (decision A38):
 | BR-09 | HARD | SKIP | Delay explains more deviance than promise | — | not runnable |
 | BR-10 | SOFT | PASS | Month-end COD RTO lift | >= +1.5pp | +3.53pp |
 | BR-11 | HARD | PASS | Switch-COD RTOs less than intent-COD | >= 5pp lower | +16.45pp |
-| LK-01 | HARD | SKIP | View columns subset of safe whitelist | — | not runnable |
+| LK-01 | HARD | PASS | View columns subset of safe whitelist | enforced | verified against the live database |
 | LK-02 | HARD | PASS | No blocked column is also whitelisted | empty intersection | 0 overlap(s) |
 | LK-03 | HARD | PASS | Safe-feature AUC below the leakage guard | < 0.85 | ceiling 0.7717 |
 | LK-04 | HARD | PASS | Point-in-time integrity | zero violations | structural |
-| LK-05 | HARD | SKIP | analyst role has zero privileges on truth | — | not runnable |
+| LK-05 | HARD | PASS | analyst role has zero privileges on truth | enforced | verified against the live database |
 | LK-06 | HARD | PASS | Shrinkage prior is a declared constant, not computed from the data | rto=0.165, cod=0.62, payment=0.1382, k=8.0 (exact) | rto=0.165, cod=0.62, payment=0.1382, k=8.0 |
-| DQ-01 | HARD | SKIP | Reproducibility hash matches manifest | — | not runnable |
+| DQ-01 | HARD | PASS | Reproducibility hash matches manifest | enforced | verified against the live database |
 | DQ-02 | HARD | PASS | No duplicate primary keys | zero | 0 |
 | DQ-03 | HARD | PASS | No orphan foreign keys | zero | 0 |
 | DQ-04 | HARD | PASS | No negative cost lines | zero | 0 |
@@ -127,15 +128,11 @@ Frozen (decision A38):
 
 ## 5 — Skipped tests, split by reason
 
-**These are NOT passes and NOT failures.** Nine HARD tests could not run. They are split below so that "9 skipped" is never read as "9 unverified": the first group is blocked by this machine, the second is out of scope for Phase 2B by design.
+**These are NOT passes and NOT failures.** 6 HARD test(s) could not run. They are grouped by cause so that a skip count is never read as an unverified count.
 
-### ENVIRONMENT-BLOCKED — need a live PostgreSQL
+### ENVIRONMENT-BLOCKED — none
 
-- **LK-01** — View columns subset of safe whitelist. Needs a live PostgreSQL to read the view definition. No server on this machine; the DDL parses but was never applied.
-- **LK-05** — analyst role has zero privileges on truth. Needs a live PostgreSQL. sql/01_schema_truth.sql contains the REVOKEs and parses, but has never been applied.
-- **DQ-01** — Reproducibility hash matches manifest. Needs a stored manifest from a prior run. The seed harness and params hash are in place; the first run has nothing to compare to.
-
-The DDL parses cleanly (34/34 statements) but has never been applied. These three unblock the moment a server exists.
+LK-01, LK-05 and DQ-01 ran against a live PostgreSQL and PASSED. LK-05 in particular was verified by opening a real connection AS the `analyst` role and having both `truth` reads refused with SQLSTATE 42501 — enforcement, not a catalogue inspection of intent.
 
 ### PHASE-5-DEFERRED — need fitted models, out of scope for Phase 2B
 
@@ -154,18 +151,6 @@ Phase 2B builds the *dataset*; these test what an analysis recovers **from** it.
 **BR-09 — Delay explains more deviance than promise** (SKIP)
 
 Needs a fitted model on attempt_delay_days vs estimated_delivery_days. Phase 5 territory; the data supports it.
-
-**LK-01 — View columns subset of safe whitelist** (SKIP)
-
-Needs a live PostgreSQL to read the view definition. No server on this machine; the DDL parses but was never applied.
-
-**LK-05 — analyst role has zero privileges on truth** (SKIP)
-
-Needs a live PostgreSQL. sql/01_schema_truth.sql contains the REVOKEs and parses, but has never been applied.
-
-**DQ-01 — Reproducibility hash matches manifest** (SKIP)
-
-Needs a stored manifest from a prior run. The seed harness and params hash are in place; the first run has nothing to compare to.
 
 **GT-01 — Coefficient recovery** (SKIP)
 

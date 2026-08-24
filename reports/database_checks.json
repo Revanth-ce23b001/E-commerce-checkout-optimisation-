@@ -1,0 +1,21 @@
+{
+  "fct_order_sha256": "49b066f06ed1fae63fb5ef65c88cbf5c1199f86c9267936d869b590357cd2aee",
+  "checks": {
+    "LK-01": {
+      "passed": true,
+      "detail": "all 52 view columns are on the safe whitelist"
+    },
+    "LK-05": {
+      "passed": true,
+      "detail": "connected AS analyst: both truth tables denied with SQLSTATE 42501; analytics.fct_order readable (105,605 rows); 0 PUBLIC grants, 0 role memberships, 0 stray truth tables"
+    },
+    "DQ-01": {
+      "passed": true,
+      "detail": "identical across regeneration: 49b066f06ed1fae63fb5ef65c88cbf5c... (105,605 orders, seed 20260115)"
+    },
+    "CONSTR": {
+      "passed": true,
+      "detail": "102 check predicates re-evaluated row by row, 0 violations"
+    }
+  }
+}

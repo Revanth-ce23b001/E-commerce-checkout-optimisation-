@@ -31,6 +31,10 @@ sys.path.insert(0, str(REPO_ROOT))
 from src.config.loader import load_params  # noqa: E402
 from src.config.seeds import spawn_substreams  # noqa: E402
 from src.generators import materialise  # noqa: E402
+from src.generators.conversion import project_checkout_events  # noqa: E402
+from src.generators.events import (  # noqa: E402
+    build_delivery_events, build_truth_probabilities,
+)
 from src.generators.customers import generate_customers  # noqa: E402
 from src.generators.dates import generate_dates  # noqa: E402
 from src.generators.geography import generate_geography  # noqa: E402
@@ -123,8 +127,8 @@ def main(argv: list[str] | None = None) -> int:
     sessions_out = materialise.resolve_sessions(params, sessions, extra)
     sessions_out["signup_date"] = customers.set_index("customer_id")["signup_date"]\
         .reindex(sessions_out["customer_id"]).to_numpy()
-    state = materialise.build_state(params, sessions_out, extra)
-    orders = materialise.build_orders(params, sessions_out, extra, dates)
+    state = materialise.build_state(params, sessions_out, extra, dates)
+    orders = materialise.build_orders(params, sessions_out, extra, dates, products)
     attempts = materialise.build_payment_attempts(
         params, sessions_out, extra, rng.get("payment")
     )
@@ -152,15 +156,44 @@ def main(argv: list[str] | None = None) -> int:
         orders, economics, _auc(params, extra), ledger, hypotheses,
     )
 
+    # ndr_code belongs on fct_delivery_event (spec 3.11), not on fct_order. It is
+    # carried on the order frame only so the delivery-event projection can read
+    # it, and is dropped before the table is written.
+    orders_out = orders.drop(columns=["ndr_code"], errors="ignore")
+
+    # Module-20 roll-up. customers.py leaves true_cod_propensity as NaN because
+    # sessions do not exist yet at module 06, and the fill was never written --
+    # the live load found it, exactly as it found pit_avg_order_value: a
+    # placeholder that the parquet layer was happy to keep forever.
+    # Spec 3.13: customer-level mean P(COD) across their sessions.
+    truth_probabilities = build_truth_probabilities(sessions_out, extra)
+    propensity = (
+        truth_probabilities[["session_id", "p_cod_intent"]]
+        .merge(sessions_out[["session_id", "customer_id"]], on="session_id")
+        .groupby("customer_id")["p_cod_intent"].mean().round(4)
+    )
+    latents = latents.copy()
+    latents["true_cod_propensity"] = (
+        latents["customer_id"].map(propensity).to_numpy()
+    )
+    # Decision A18 again: a customer with no in-window session has no denominator,
+    # so the mean is NULL rather than imputed. Roughly 6% of the base.
+    unsessioned = int(latents["true_cod_propensity"].isna().sum())
+    print(f"       true_cod_propensity: {len(latents) - unsessioned:,} populated, "
+          f"{unsessioned:,} NULL (no in-window session)")
+
     tables = {
         "dim_date": dates, "dim_geography": geography, "dim_seller": sellers,
         "dim_product": products, "dim_customer": customers,
         "truth_customer_latent": latents,
         "fct_checkout_session": sessions_out.drop(columns=["signup_date"]),
         "fct_customer_state_at_session": state,
-        "fct_order": orders,
+        "fct_order": orders_out,
         "fct_payment_attempt": attempts,
         "fct_order_economics": economics,
+        "fct_checkout_event": project_checkout_events(sessions_out),
+        "fct_delivery_event": build_delivery_events(params, orders, extra, geography),
+        "truth_order_probability": truth_probabilities,
     }
     # Not a table: carried through so the A36 ratio check can compare the
     # realised category mix against what params.yaml declares.
@@ -168,6 +201,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.no_write:
         OUT_DIR.mkdir(parents=True, exist_ok=True)
+        # Clear first. A parquet left behind by an earlier pipeline shape would
+        # still satisfy every foreign key -- session ids are stable -- while
+        # carrying values from a different parameterisation. Silent, and exactly
+        # the kind of inconsistency the loader would happily import.
+        stale = [f for f in OUT_DIR.glob("*.parquet") if f.stem not in tables]
+        for f in OUT_DIR.glob("*.parquet"):
+            f.unlink()
+        if stale:
+            print(f"  removed {len(stale)} stale table(s): "
+                  + ", ".join(sorted(f.stem for f in stale)))
         for name, frame in tables.items():
             frame.to_parquet(OUT_DIR / f"{name}.parquet", index=False)
         print(f"\nwrote {len(tables)} table(s) to {OUT_DIR}")

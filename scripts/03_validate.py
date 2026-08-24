@@ -143,27 +143,38 @@ def _write_report(params, tables, truth, results, verdict, reason) -> None:
     env_blocked = {"LK-01", "LK-05", "DQ-01"}
     skips = [r for r in results.results if r.status is Status.SKIP]
     if skips:
+        blocked = [x for x in skips if x.test_id in env_blocked]
+        deferred = [x for x in skips if x.test_id not in env_blocked]
         lines += [
             "", "## 5 — Skipped tests, split by reason", "",
-            "**These are NOT passes and NOT failures.** Nine HARD tests could not run. "
-            "They are split below so that \"9 skipped\" is never read as \"9 unverified\": "
-            "the first group is blocked by this machine, the second is out of scope for "
-            "Phase 2B by design.", "",
-            "### ENVIRONMENT-BLOCKED — need a live PostgreSQL", "",
+            f"**These are NOT passes and NOT failures.** {len(skips)} HARD test(s) "
+            "could not run. They are grouped by cause so that a skip count is never "
+            "read as an unverified count.", "",
         ]
-        for r in [x for x in skips if x.test_id in env_blocked]:
-            lines.append(f"- **{r.test_id}** — {r.name}. {r.detail}")
-        lines += [
-            "", "The DDL parses cleanly (34/34 statements) but has never been applied. "
-            "These three unblock the moment a server exists.", "",
-            "### PHASE-5-DEFERRED — need fitted models, out of scope for Phase 2B", "",
-        ]
-        for r in [x for x in skips if x.test_id not in env_blocked]:
-            lines.append(f"- **{r.test_id}** — {r.name}. {r.detail}")
-        lines += [
-            "", "Phase 2B builds the *dataset*; these test what an analysis recovers "
-            "**from** it. The data and `_truth.json` support every one of them.", "",
-        ]
+        if blocked:
+            lines += ["### ENVIRONMENT-BLOCKED — need a live PostgreSQL", ""]
+            for r in blocked:
+                lines.append(f"- **{r.test_id}** — {r.name}. {r.detail}")
+            lines += ["", "These unblock the moment a server exists.", ""]
+        else:
+            lines += [
+                "### ENVIRONMENT-BLOCKED — none", "",
+                "LK-01, LK-05 and DQ-01 ran against a live PostgreSQL and PASSED. "
+                "LK-05 in particular was verified by opening a real connection AS the "
+                "`analyst` role and having both `truth` reads refused with SQLSTATE "
+                "42501 — enforcement, not a catalogue inspection of intent.", "",
+            ]
+        if deferred:
+            lines += [
+                "### PHASE-5-DEFERRED — need fitted models, out of scope for Phase 2B",
+                "",
+            ]
+            for r in deferred:
+                lines.append(f"- **{r.test_id}** — {r.name}. {r.detail}")
+            lines += [
+                "", "Phase 2B builds the *dataset*; these test what an analysis recovers "
+                "**from** it. The data and `_truth.json` support every one of them.", "",
+            ]
 
     notes = [r for r in results.results if r.status is not Status.PASS and r.detail]
     if notes:

@@ -183,7 +183,33 @@ def generate_economics(
     money = [c for c in frame.columns if c != "order_id"]
     frame.loc[cancelled, money] = 0.0
 
-    return frame.round(2)
+    return _quantise_to_paisa(frame, rto & ~cancelled)
+
+
+# Every line above is computed in full float precision and the identities hold
+# exactly there. Rounding each column to paisa independently breaks them by up
+# to a paisa, which the eco_cm_identity CHECK rejected on the very first row of
+# the live load. Money is quantised to paisa, so the honest fix is to quantise
+# the LINES and then re-derive the aggregates from the quantised lines -- the
+# ledger then adds up exactly, as a ledger must. Nothing is being nudged to pass
+# a test: the change to any figure is bounded by one paisa.
+_COST_LINES = [
+    "forward_shipping_cost", "packaging_cost", "payment_processing_fee",
+    "cod_handling_cost", "reverse_shipping_cost", "reverse_handling_cost",
+    "shrink_cost", "cod_failed_attempt_cost", "working_capital_cost",
+    "support_ndr_cost", "ops_allocation_cost",
+]
+
+
+def _quantise_to_paisa(frame: pd.DataFrame, is_rto) -> pd.DataFrame:
+    frame = frame.round(2)
+    frame["total_variable_cost"] = frame[_COST_LINES].sum(axis=1).round(2)
+    frame["contribution_margin"] = (
+        frame["net_revenue"] - frame["cogs"] - frame["total_variable_cost"]
+    ).round(2)
+    frame["rto_cash_loss"] = np.where(is_rto, -frame["contribution_margin"], 0.0)
+    frame["rto_economic_cost"] = frame["rto_cash_loss"] + frame["foregone_cm"]
+    return frame
 
 
 def _counterfactual_cm(

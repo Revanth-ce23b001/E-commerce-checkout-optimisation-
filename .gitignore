@@ -34,3 +34,6 @@ Thumbs.db
 .DS_Store
 .vscode/
 .idea/
+
+# Local database credentials (dev-only, but never committed).
+config/database.env

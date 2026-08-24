@@ -51,7 +51,13 @@ CREATE TABLE truth.truth_customer_latent (
     latent_intent           NUMERIC(6,4) NOT NULL,
     latent_price_sensitivity NUMERIC(6,4) NOT NULL,
     -- Customer-level mean P(COD) across their sessions. Diagnostic.
-    true_cod_propensity     NUMERIC(5,4) NOT NULL,
+    -- NULLABLE, and deliberately so. 3,284 of 55,000 customers (6.0%) open no
+    -- session inside the 90-day window, so this mean has no denominator. Spec
+    -- §3.13 declares the type only; the NOT NULL was added here and was wrong.
+    -- Decision A18's rule applies unchanged: a rate with an empty denominator is
+    -- NULL, never imputed -- imputing 0.62 would invent 3,284 fictitious
+    -- COD-average customers in the truth table itself.
+    true_cod_propensity     NUMERIC(5,4),
 
     CONSTRAINT lat_propensity_range CHECK (true_cod_propensity BETWEEN 0 AND 1)
 );

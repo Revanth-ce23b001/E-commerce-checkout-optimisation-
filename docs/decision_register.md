@@ -1439,6 +1439,37 @@ The naive estimate is 1.77x the truth. Downstream reads data/truth/_truth.json.
 
 Both are results, not defects. Neither was tuned toward its prior.
 
+### A44 - Five defects that only a LIVE database could find · **RESOLVED**
+
+The parquet layer enforces nothing. Applying the DDL to real rows for the first
+time surfaced five defects in a single sitting, none of which any of the 42
+data-validation tests or the 146 unit tests had detected. Each is recorded here
+because "the load found it" is the interesting part -- the schema was written
+months of work before it was ever executed, and text that has never run is not a
+constraint.
+
+| # | Defect | Caught by | Resolution |
+|---|---|---|---|
+| 1 | `fct_order` missing four DDL columns: `seller_id`, `discount_amount`, `shipping_fee_charged`, `cod_fee_charged`. `ndr_code` present but belongs on `fct_delivery_event` (spec 3.11) | `NotNullViolation` on `seller_id` | Added to `build_orders`; `ndr_code` carried in memory for the delivery-event projection and dropped before write |
+| 2 | Every cost line rounded to paisa independently, so `contribution_margin = net_revenue - cogs - total_variable_cost` failed by up to 1 paisa | `CheckViolation: eco_cm_identity`, first row | Quantise the LINES, then re-derive the aggregates from the quantised lines. Money is paisa-quantised and a ledger must add up. Every figure moves by at most 1 paisa |
+| 3 | `pit_avg_order_value` hardcoded `np.nan` -- a permanently empty column | `pit_missing_iff_no_history` CHECK | Populated from the day loop. Now 54.83% dense, mean 926.82 |
+| 4 | `pit_days_since_last_order` never materialised. The day loop collected `pit_last_order_day` and nothing consumed it. **This is a WHITELISTED risk-model feature** (`leakage_guard.safe_feature_whitelist`, `sql/04` line 70) -- Phase 3 would have trained on a column of nulls | pre-flight column diff | Computed in `materialise.build_state` from the collected array |
+| 5 | `true_cod_propensity` left `np.nan` at module 06 with a comment saying it is "filled at the module-20 roll-up". The roll-up was never written | `NotNullViolation` | Rolled up as the customer-level mean `p_cod_intent`. The `NOT NULL` was **removed**: 3,284 of 55,000 customers (6.0%) open no in-window session, so the mean has no denominator. Spec 3.13 declares the type only -- the `NOT NULL` was added here and was wrong. Decision A18 applies unchanged: NULL, never imputed |
+
+Defects 3, 4 and 5 are one failure mode wearing three hats: a placeholder written
+early, a `TODO` in a comment rather than in the code, and no check anywhere that
+a declared column is ever populated. Defect 4 is the dangerous one -- it is on
+the safe-feature whitelist, so it would have reached a fitted model silently.
+
+**Added to the pre-flight**: every table's frame is diffed against
+`information_schema.columns` before the COPY, and NOT NULL columns are checked
+for nulls. Columns with a server-side default (the three `SERIAL` surrogate keys)
+are exempt.
+
+**Nothing here touched a slope, a level or a business assumption.** Defect 2 is a
+representation decision; the rest are columns that were specified and never
+filled.
+
 ### Remaining
 
 | Item | Status |

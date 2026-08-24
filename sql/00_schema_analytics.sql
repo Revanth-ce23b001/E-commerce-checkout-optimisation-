@@ -308,8 +308,15 @@ CREATE TABLE fct_customer_state_at_session (
     -- rather than something a generator bug could silently fill in.
     CONSTRAINT pit_history_flag    CHECK (pit_has_history = (pit_orders_placed > 0)),
     CONSTRAINT pit_missing_iff_no_history CHECK (
-        (pit_cod_share       IS NULL) = (pit_orders_placed = 0) AND
-        (pit_avg_order_value IS NULL) = (pit_orders_placed = 0)),
+        (pit_cod_share IS NULL) = (pit_orders_placed = 0)),
+    -- pit_avg_order_value is deliberately NOT in the constraint above.
+    -- It was, and the live load rejected the very first row -- correctly.
+    -- Decision A30 came later and scoped this column to IN-WINDOW orders only:
+    -- dim_customer has no pre-window order-value column, so a customer with five
+    -- pre-window orders and none yet in the window has history AND a NULL average.
+    -- That condition is not expressible against pit_orders_placed, so it is
+    -- asserted in the generator and recorded as limitation L2 rather than faked
+    -- here with a constraint that would only look like a guarantee.
     CONSTRAINT pit_raw_rate_missing CHECK (
         (pit_rto_rate_raw IS NULL) = (pit_orders_resolved = 0)),
     CONSTRAINT pit_new_coherent    CHECK (pit_is_new_customer = (pit_orders_delivered = 0)),
