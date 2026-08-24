@@ -32,8 +32,16 @@ Read the relevant section before implementing. Do not work from memory of a prev
 ## INVARIANTS — never change without asking
 
 ### Scale
-- ≥ 100,000 orders · ≈ 147,059 checkout sessions · 90-day window
-- Population framing: 24,000,000 orders/year · **annualisation factor ×240**
+- **≥ 100,000 orders** (VOL-01, HARD) · 90-day window
+- **Session count is an INPUT KNOB, not a target** (decision A31). Currently 155,000. It was
+  147,059 = `target_orders / 0.68`, which made VOL-01 require conversion ≥ exactly 68.00% —
+  the midpoint of CAL-06's own ±2pp band. Do not re-pin it to a conversion estimate.
+- Population framing: 24,000,000 orders/year
+- **Annualisation factor = 24,000,000 ÷ actual order count (≈230). DERIVED — never
+  hard-coded.** The old ×240 silently encoded a 100,000-order sample, so changing the
+  session count would have moved the ₹165 Cr headline for no business reason. Total cost ×
+  (population ÷ sample) is invariant to sample size, which is exactly why it must be
+  derived. EC-08 (HARD) asserts the derived factor lands in [200, 280].
 
 ### Calibration targets
 | Metric | Target | Tolerance |

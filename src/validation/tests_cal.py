@@ -46,6 +46,15 @@ from src.validation.result import ResultSet, Severity, Status, TestResult
 
 # Structural key names, not business values.
 COEFFICIENTS_KEY = "coefficients"
+# The RTO model's Stage-2 deltas live in their own block. They are slopes and are
+# just as immutable as the Stage-1 coefficients, so CAL-09 must cover them --
+# otherwise the post-dispatch shock would be the one place in the project where a
+# coefficient could be nudged without any test noticing.
+SHOCK_KEY = "post_dispatch_shock"
+SHOCK_PREFIX = "shock."
+# Not a slope: the spec calls this "the AUC ceiling lever" and GT-05 sets the
+# ceiling as a target, so it is a calibrated quantity by design.
+SHOCK_EXCLUDED = ("noise_sd",)
 REASONS_BLOCK = "rto_reasons"
 FROZEN_HASH_KEY = "frozen_hash"
 IMMUTABLE_REASON_KEYS = ("base_weights", "driver_weights", "class_map")
@@ -112,6 +121,9 @@ def cal_09_no_slope_changed(
 
     for block in model_blocks:
         declared = _flatten_coefficients(params.get(f"{block}.{COEFFICIENTS_KEY}", default={}))
+        for term, value in params.get(f"{block}.{SHOCK_KEY}", default={}).items():
+            if term not in SHOCK_EXCLUDED:
+                declared[f"{SHOCK_PREFIX}{term}"] = float(value)
         used = ledger.slopes(block)
 
         for term, used_value in used.items():

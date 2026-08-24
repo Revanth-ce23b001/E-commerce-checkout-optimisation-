@@ -7,6 +7,7 @@
   "required": [
     "meta",
     "scale",
+    "volume_targets",
     "calibration_targets",
     "selection_share_gate",
     "reported_not_tested",
@@ -256,10 +257,10 @@
         "n_geographies",
         "target_orders",
         "checkout_conversion_target",
+        "n_sessions",
         "population_annual_orders",
-        "sample_to_quarter_factor",
-        "quarter_to_year_factor",
-        "annualization_factor"
+        "annualization_factor_expected",
+        "annualization_factor_bounds"
       ],
       "properties": {
         "n_customers": {
@@ -291,17 +292,30 @@
           "type": "integer",
           "minimum": 1
         },
-        "sample_to_quarter_factor": {
-          "type": "number",
+        "n_sessions": {
+          "description": "Decision A31: a free INPUT KNOB, not a business target.",
+          "type": "integer",
           "minimum": 1
         },
-        "quarter_to_year_factor": {
+        "annualization_factor_expected": {
+          "description": "REPORTING ONLY. Never used in a calculation - the factor is derived as population_annual_orders / COUNT(fct_order).",
           "type": "number",
-          "minimum": 1
+          "exclusiveMinimum": 0
         },
-        "annualization_factor": {
-          "type": "number",
-          "minimum": 1
+        "annualization_factor_bounds": {
+          "type": "object",
+          "required": [
+            "lo",
+            "hi"
+          ],
+          "properties": {
+            "lo": {
+              "type": "number"
+            },
+            "hi": {
+              "type": "number"
+            }
+          }
         }
       }
     },
@@ -1315,6 +1329,41 @@
         "logit_contribution_when_null": {
           "description": "The term is switched OFF, not filled in. Must be exactly zero.",
           "const": 0.0
+        }
+      }
+    },
+    "volume_targets": {
+      "description": "Decision A31. VOL-01 is a HARD floor on orders; VOL-02 is reframed as a SOFT session band plus a HARD internal-consistency check.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "vol_01_min_orders",
+        "vol_02a_session_band",
+        "vol_02b_conversion_consistency_tol"
+      ],
+      "properties": {
+        "vol_01_min_orders": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "vol_02a_session_band": {
+          "type": "object",
+          "required": [
+            "lo",
+            "hi"
+          ],
+          "properties": {
+            "lo": {
+              "type": "integer"
+            },
+            "hi": {
+              "type": "integer"
+            }
+          }
+        },
+        "vol_02b_conversion_consistency_tol": {
+          "type": "number",
+          "exclusiveMinimum": 0
         }
       }
     }

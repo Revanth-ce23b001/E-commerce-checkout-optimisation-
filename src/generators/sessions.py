@@ -152,10 +152,13 @@ def generate_sessions(
 
 
 def _session_count(params) -> int:
-    """``target_orders / checkout_conversion_target`` — the north-star denominator."""
-    target_orders = int(params.require("scale.target_orders"))
-    conversion = float(params.require("scale.checkout_conversion_target"))
-    return int(round(target_orders / conversion))
+    """The north-star denominator. Decision A31: read, not derived.
+
+    It used to be ``target_orders / checkout_conversion_target``, which pinned it
+    to the midpoint of CAL-06's tolerance band and made VOL-01 fail for any
+    conversion CAL-06 permitted below 68.00%. Session count is an input knob.
+    """
+    return int(params.require("scale.n_sessions"))
 
 
 def _allocate_to_days(dates: pd.DataFrame, n_sessions: int) -> np.ndarray:

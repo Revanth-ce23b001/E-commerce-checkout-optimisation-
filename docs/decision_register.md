@@ -568,7 +568,7 @@ they mark values that came from this register rather than from the source spec.
 
 ---
 
-### A28 - Distributions for modules 08-12 · **OPEN — needs sign-off**
+### A28 - Distributions for modules 08-12 · **APPROVED 2026-08-24, with two conditions**
 
 Same status and same pattern as A27: required by the spec, never quantified by it. Written
 into `params.yaml` under `distributions.*` tagged **`[A28 PROPOSED]`**.
@@ -585,7 +585,28 @@ into `params.yaml` under `distributions.*` tagged **`[A28 PROPOSED]`**.
 | `conversion.address_hurdle_share` | 0.35 | Payment-page-weighted, because that is where real checkouts shed most traffic. The split is exact — `p_address x p_payment == p_convert` — so it costs no accuracy. |
 | `conversion.joint_solve_passes` | 3 | beta_0 and alpha_0 are interdependent; see the build status for the observed drift. |
 
-None of these feeds a planted causal coefficient. **Requesting a ruling.**
+None of these feeds a planted causal coefficient.
+
+**Approved with two conditions, both met.**
+
+**(a) `address_completeness` independent of `geo_tier` must be a STATED property, not
+an accidental one.** The generation checkpoint now reports the realised correlation
+between `address_completeness_score` and `geo_tier`, and the trade is written up as
+**L1** in `docs/limitations.md`: real Tier-3 addresses probably *are* worse, and we are
+trading that realism for an intervention whose effect is cleanly attributable rather
+than entangled with a fairness problem it does not have.
+
+**(b) Confirm which level was made uniform.** Stated explicitly, and it is not the day
+level:
+
+| Level | Allocation |
+|---|---|
+| Across **customers** | **Uniform.** Per-customer session count is ~Poisson. This is the one that is not latent-driven. |
+| Across **days** | **NOT uniform** — driven by `dim_date.demand_index`: weekday rhythm, month-end ×1.08, salary-week ×1.06. |
+| Within a **day** | Evening-weighted via `session.hour_of_day_weights`. |
+
+The temporal structure is intact, which BR-10 (month-end COD RTO lift) and DQ-14
+(censoring concentrated in the late window) both depend on. Recorded as **L3**.
 
 ---
 
@@ -631,7 +652,7 @@ reading the dictionary would not expect the sparsity.
 
 ---
 
-### A31 - VOL-01, VOL-02 and CAL-06 are jointly knife-edge · **OPEN — needs ruling**
+### A31 - VOL-01, VOL-02 and CAL-06 are jointly knife-edge · **RULED 2026-08-24 · APPROVED**
 
 **Problem, verified arithmetically at full scale.** Three HARD tests interact:
 
@@ -670,92 +691,318 @@ document the residual sliver as a known joint constraint.
 emergent from seven fixed slopes and one calibrated intercept. Tuning anything to make three
 mutually-constraining HARD tests agree is exactly the failure mode CAL-09 exists to prevent.
 
-**Not fixed unilaterally** — the session count is an invariant in CLAUDE.md
-(~147,059 sessions), so changing it needs a ruling.
+**Ruling — logged as a specification error.** Session count was derived from a point
+estimate of conversion and then made HARD. It is an **input knob**, not a business target.
+
+1. **`n_sessions` becomes a free parameter, set to 155,000** — not 150,000. All five
+   intercepts are re-solved once the A1 day loop closes, so conversion moves again;
+   150,000 sits on the old VOL-02 cap with zero headroom. 155,000 clears VOL-01 across
+   the *entire* CAL-06 band: 102,300 orders at 0.660, 105,400 at 0.680, 108,500 at 0.700.
+2. **VOL-01 (>=100,000 orders) stays HARD.** It is the case-study headline.
+3. **VOL-02 reframed.** The `[145,000, 150,000]` band is deleted.
+   - **VOL-02a (SOFT):** `n_sessions` in [145,000, 170,000] — sanity, not a target.
+   - **VOL-02b (HARD):** `|orders/sessions - reported conversion| < 0.001` — an
+     internal-consistency check, not a level check. A level test on an input knob was
+     testing the knob rather than the data.
+4. **CAL-06 unchanged** at [66.0%, 70.0%]. The infeasible sliver disappears once the
+   session count is no longer pinned to the midpoint.
+
+**Applied.** `scale.n_sessions` · `volume_targets` block · `sessions.py` reads the knob
+instead of deriving it · CLAUDE.md scale invariant restated · `dev_small.yaml` scales
+`n_sessions` in the same proportion (it was inheriting the full 155,000, which would have
+given the dev scenario 55 sessions per customer instead of 2.8).
+
+---
+
+### A32 - The annualisation factor must be DERIVED · **RULED 2026-08-24 · APPROVED**
+
+**Consequence of A31 that was not in the modules 08-12 report.** `annualization_factor:
+240` was a fixed literal in `params.yaml`, computed as 24,000,000 / 100,000. With the
+session count now a free knob producing ~105,000 orders, a fixed 240 would have inflated
+the annual opportunity by ~4.8% — the ₹165 Cr headline drifting to ~₹173 Cr purely because
+a knob unrelated to the business had moved.
+
+**Ruling.**
+
+| Quantity | Status |
+|---|---|
+| `population_annual_orders: 24000000` | **FIXED** business assumption |
+| `annualization_factor` | **DERIVED at validation time**: `population_annual_orders / COUNT(fct_order)` |
+| The literal `240` | **Removed.** Survives only as `annualization_factor_expected: 240`, reporting only, never used in a calculation |
+| EC-07 (annualised exposure) | uses the derived factor |
+| **EC-08 (HARD, new)** | derived factor within [200, 280]; outside that band the sample drifted far enough to warrant a look |
+
+**Why it must be derived rather than pinned.** Total RTO cost × (population ÷ sample) is
+*invariant to sample size*. Pinning the factor breaks that invariance and makes the
+headline a function of a generator setting. Deriving it makes the headline a function of
+the business.
+
+**Applied.** `params.yaml` (literal removed, bounds added) · CLAUDE.md scale invariant
+restated as "annualisation factor = 24,000,000 ÷ actual order count (≈230, DERIVED —
+never hard-coded)" · `sample_to_quarter_factor` and `quarter_to_year_factor` removed too,
+since 60 × 4 = 240 encoded the same 100,000-order assumption.
+
+---
+
+### A33 - Distributions for modules 13-17 · **OPEN — needs sign-off**
+
+Same status and pattern as A27 / A28. Tagged `[A33 PROPOSED]` in `params.yaml` under
+`distributions.delivery`.
+
+| Value | Why |
+|---|---|
+| `transit_multiplier_mean: 1.00`, `sd: 0.28` | Transit time as a multiple of the destination's `base_delivery_days`, so the promise and the reality share a scale. |
+| `courier_reliability_transit_weight: 0.45` | Worse couriers are slower. **This is the load-bearing one**: it is what correlates `attempt_delay_days` with `courier_reliability_score`, so the two Stage-2 shock terms are not independent. Setting it to zero would make δ₁ and δ₂ orthogonal, which is unrealistic and would make the shock easier to decompose than it should be. |
+| `attempt_gap_days: 2`, `rto_initiation_days: 2` | Spacing of failed attempts, and the wait before a return is raised. Drives how long an RTO takes to resolve, and therefore how much of the late window is censored (DQ-14). |
+| `rto_return_days: LogN(1.35, 0.40)` | The return leg, ~4 days median. |
+| `risk_tier_rules.m2_cod_escalates_one_tier` | The **third** rule of blueprint §9.3's baseline ("payment method + prior RTO + tenure"). It belongs to M2 only and must never touch the Stage-2 tier (decision A21). |
+
+**Requesting a ruling.**
+
+---
+
+### A34 - EC-01: mean GMV or mean order_value? · **OPEN — CONTRADICTS A5, needs a ruling**
+
+⚠️ **The A31 follow-on instruction reverses decision A5, which was approved on
+2026-08-24.** Flagging rather than resolving, because the two readings imply different
+economics and A5's rationale is still on the record.
+
+| | **A5 as approved** | **The new instruction** |
+|---|---|---|
+| EC-01 tests | mean **GMV** per order = ₹1,000 | mean **order_value** = ₹1,000 |
+| implies mean GMV | ₹1,000 | ₹1,000 / 0.92 = **₹1,087** |
+| implies mean order_value | ₹920 | ₹1,000 |
+| `E[list_price]` | ₹1,000 / E[quantity] | ₹1,000 / 0.92 / E[quantity] |
+
+**What A5 was approved on.** Blueprint §1.1 states **₹2,400 Cr annual GMV over 24M
+orders** — exactly ₹1,000 of GMV per order — and §6.5's worked example opens with
+"GMV ₹1,000". Every locked figure (+₹112, +₹107, −₹309, −₹416, p\* = 25.7%) is computed
+starting from a ₹1,000 **GMV** order.
+
+**What changes if EC-01 moves to order_value.** Mean GMV becomes ₹1,087, so annual GMV
+becomes 24M × ₹1,087 = **₹2,609 Cr, not ₹2,400 Cr** — the blueprint's own headline breaks
+by 8.7%. And the five locked CM figures were computed at GMV ₹1,000, so each would need
+recomputing at GMV ₹1,087; they are currently HARD tests EC-03…EC-06.
+
+**Current implementation: A5 as approved.** `calibration_targets.mean_gmv_per_order`
+tests GMV at ₹1,000; module 05 divides the category means by E[quantity] only. Both means
+are reported in the checkpoint so the choice can be made against real numbers.
+
+**Recommendation: keep A5.** It preserves the ₹2,400 Cr anchor and all five locked
+economics figures. If EC-01 should instead pin `order_value`, that is a defensible
+position — but it needs the blueprint's GMV headline and the CM waterfall restated with
+it, and that should be an explicit decision rather than a side effect.
+
+---
+
+### A35 - H11 prior is likely to be rejected · **RECORDED — a finding, not a miss**
+
+CAL-07 lands at **5.75%** of COD orders caused by prepaid payment friction, against a
+target of 6.8% ±2pp (SOFT) — comfortably passing — and against Phase 1's **pre-registered
+prior of 8–15%**, which it falls below.
+
+**This is the expected outcome and it is a finding.** Spec §10.3 says so explicitly: the
+parameters come from plausible external PG-failure ranges, not from the prior, and
+blueprint §4 says *"nothing signals genuine analytical work more than a documented wrong
+prior"*. H11 was flagged as the most likely candidate.
+
+**The honest write-up:** *payment-friction-driven COD is real but smaller than
+hypothesised. It is still the first thing to ship, because it is free — but it does not
+reframe the project.*
+
+**The sharper finding sits next to it (deviation D5).** Switch-COD orders carry −0.45 in
+the RTO logit, so they should fail materially less often than intent-COD. Fixing payment
+reliability does not merely move volume to prepaid — it recovers *the better half* of COD.
+That is a stronger business argument than the raw 5.75%.
+
+---
+
+### A36 - EC-01 is measured on ORDERS, and conversion selects on order value · **OPEN — needs a ruling**
+
+**Problem, measured at full scale.** `conversion_model.log_order_value = -0.18` means
+expensive carts convert less often. EC-01 is measured on the **order** population, which
+is therefore a *selected* sample of the session population — selected on precisely the
+variable EC-01 tests.
+
+| | mean GMV | mean order_value |
+|---|---:|---:|
+| all sessions | 1,004.15 | 922.73 |
+| **converted (= orders)** | **962.70** | **884.34** |
+| selection effect | **−4.13%** | −4.16% |
+
+The E[quantity] correction from A29 works: sessions land at 1,004. The order population
+then drifts 4.1% low, which is **outside EC-01's ±₹25 (±2.5%) tolerance**.
+
+**Options.**
+
+- **(a) Accept and report.** EC-01 misses by ~₹37 and the miss is explained. Honest, but
+  EC-01 is HARD, so this would need EC-01 downgraded or its tolerance widened.
+- **(b) Compensate at the session level.** Draw session values from a distribution
+  centred at **₹1,043** so the ORDER population averages ₹1,000. Arguably this is
+  implementing spec §12.1 correctly — that table describes the *order* value distribution,
+  and orders are what it should reproduce. Exactly analogous to the E[quantity] correction
+  already accepted under A29.
+- **(c) Set `conversion_model.log_order_value` to zero.** Rejected: it is an approved
+  slope, CAL-09 forbids moving it, and it is the checkout-friction mechanism that makes
+  `abandon_step` meaningful.
+
+**Recommendation: (b).** It changes no business assumption — the *target* stays ₹1,000 on
+orders — and it makes the generator reproduce the spec's own table rather than a
+value-selected sample of it. It should be an explicit compensation factor in
+`params.yaml`, derived and documented, not a silently retuned category mean.
+
+**Interacts with A34.** If EC-01 is instead re-pinned to `order_value` (the A34 reading),
+the required session-level centre changes again. Rule A34 first.
+
+---
+
+### A37 - The AUC ceiling is 0.87, not 0.74–0.79 · **OPEN — needs a ruling. Load-bearing.**
+
+**The spec's own coefficient set, at the spec's own `noise_sd = 0.85`, does not produce
+the AUC the spec asks for.** Measured at full scale, the AUC of `truth.p_rto_precheckout`
+used as a score against realised `rto_flag` is **0.8745** — above GT-05's
+[0.74, 0.79] band, and above LK-03's 0.85 leakage guard.
+
+That matters beyond a failed test. LK-03 exists to catch leakage by flagging any
+safe-feature model scoring above 0.85. If the *theoretical ceiling* is already 0.87, LK-03
+can no longer distinguish "something leaked" from "the DGP is just very predictable" — the
+guard stops guarding.
+
+**`post_dispatch_shock.noise_sd` is the designated lever.** Spec §13.2 labels it
+`# ★ the AUC ceiling lever ★`, and GT-05 states the ceiling as a *target*. So it is a
+calibrated quantity by design — but it is **not** one of the sanctioned intercepts, so it
+was not moved. Swept instead, at full scale, re-solving γ₀ at each setting:
+
+| `noise_sd` | γ₀ | blended | COD RTO | prepaid RTO | naive gap | AME | selection share | **AUC** |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **0.85** (current) | −4.125 | 0.1631 | 0.2512 | 0.0261 | 22.51pp | 14.70 | 0.347 | **0.8745** |
+| 1.40 | −4.219 | 0.1674 | 0.2546 | 0.0316 | 22.30pp | — | — | 0.8562 |
+| 2.00 | −4.500 | 0.1656 | 0.2471 | 0.0385 | 20.86pp | — | — | 0.8308 |
+| **2.60** | −4.875 | 0.1620 | **0.2361** | **0.0459** | **19.02pp** | 11.29 | 0.406 | 0.8026 |
+| **3.00** | −5.000 | 0.1679 | **0.2403** | 0.0546 | 18.57pp | 10.75 | 0.421 | **0.7833** |
+
+**Read the table across, not down.** At 0.85 *three separate spec expectations miss at
+once*: AUC (0.87 vs 0.74–0.79), prepaid RTO (2.61% vs 4.1% — outside even the widened
+±2.5pp), and the naive gap (22.5pp vs the ~19.9pp §8.3 derives). Raising the lever to
+**2.6–3.0 brings all three onto target simultaneously**:
+
+- at 2.60, COD RTO 23.61% and prepaid RTO 4.59% both land inside even the *original*
+  ±1.5pp / ±0.8pp tolerances, and the naive gap hits 19.02pp against §8.3's 19.9pp;
+- at 3.00, the AUC lands at 0.7833, inside GT-05's band.
+
+That three independent targets converge together is strong evidence the **0.85 is the
+inconsistent value**, not the rest of the spec.
+
+**CAL-11 holds throughout**: selection share 0.347 → 0.406 → 0.421, inside [0.25, 0.45] at
+every setting, drifting toward the top of the band as noise rises. So this ruling does not
+put the case study at risk in either direction.
+
+**Recommendation: `noise_sd = 2.8`**, between the two sweet spots — the AUC lands just
+inside the band and CAL-03/04 stay comfortably on target. Not changed unilaterally:
+it is a data-generating-process parameter outside the sanctioned intercepts, and
+CLAUDE.md rule 3 says an unreachable target is a finding to escalate, not a knob to turn.
+
+**If the ruling is to keep 0.85**, then GT-05's band and LK-03's 0.85 guard both need
+restating, and the project loses its leakage tripwire.
 
 ---
 
 ## Build status
 
-**Stage 2 complete. Generation modules 02-12 built and checkpointed. 13-23 not started.**
+**Generation modules 02-17 built. The decision-A1 day loop is closed and all five
+intercepts are solved. Modules 18-23 not started.**
 
 | Component | Status |
 |---|---|
-| Config loader, seed harness, logit assembler, shrinkage, calibration solver | ✅ |
-| `config/params.yaml` + schema + `dev_small.yaml` | ✅ all rulings applied |
+| Config, schema, dev scenario, seed harness, logit assembler, calibration solver | ✅ |
 | `sql/00_schema_analytics.sql` / `01_schema_truth.sql` | ✅ parse clean — ⚠️ never executed, no PostgreSQL |
-| CAL-09 (5 blocks) · CAL-10 · CAL-11 · LK-06 | ✅ implemented and tested |
-| DQ-07a / 07b / 07c | 📋 specified; needs modules 13-20 |
-| **02** dates · **03** geography · **04** sellers · **05** products | ✅ |
-| **06** customers + latents · **07** pre-window history (2 calibrators) | ✅ |
+| CAL-09 (5 blocks **+ the Stage-2 deltas**) · CAL-10 · CAL-11 · LK-06 | ✅ |
+| DQ-07a / 07b / 07c | 📋 specified; needs modules 18-20 |
+| **02-05** dates, geography, sellers, products | ✅ |
+| **06-07** customers, latents, pre-window history | ✅ |
 | **08** sessions · **09** point-in-time state | ✅ |
-| **10** COD intent · **11a/11b** hurdles · **11c** payment attempts · **12** conversion | ✅ |
-| `fct_checkout_event` projection (A12) | ✅ deterministic, no new substream |
-| Modules 13-23 | ⬜ not started |
+| **10-12** COD intent, hurdles, payment attempts, conversion | ✅ |
+| **13-14** orders, cancellations | ✅ |
+| **15-17** pre-checkout score, delivery + shock, RTO draw | ✅ |
+| **A1 day loop closed**, 3 in-window intercepts solved jointly | ✅ drift 0.00e+00 |
+| Modules 18-23 (reasons, economics, roll-up, PostgreSQL, validation) | ⬜ not started |
 
-**144 unit tests, all passing.**
+**146 unit tests, all passing.**
 
-### Checkpoint — modules 08-12, full scale, seed 20260115
+### Checkpoint — modules 02-17, full scale, seed 20260115
 
-| Table | Rows | Spec §15 expects |
+| | Value | |
 |---|---:|---|
-| `fct_checkout_session` | 147,059 | 147,059 ✅ |
-| `fct_customer_state_at_session` | 147,059 | 147,059 ✅ |
-| `fct_payment_attempt` | 45,606 | ~78,000 ⚠️ see note |
-| `fct_checkout_event` | 770,207 | ~700,000 ✅ |
-| converted sessions (→ orders) | **99,441** | 100,000 ⚠️ **A31** |
+| sessions | 155,000 | |
+| **orders** | **104,803** | VOL-01 ✅ |
+| shipped | 100,621 | |
+| cancelled pre-ship | 4,182 | |
+| censored | 9,962 | 9.51% of orders |
+| **derived annualisation factor** | **229.00** | EC-08 [200, 280] ✅ |
 
-**Joint solve** — beta_0 and alpha_0 are interdependent, so they are solved alternately
-until both stop moving. Final-pass drift on both: **0.00e+00**.
+**Joint solve.** Three in-window intercepts, alternating to a fixed point; **drift
+0.00e+00 on all three**. The two pre-window intercepts are solved once in module 07 —
+provably independent, since no in-window quantity can reach back before the window opened.
 
-| Intercept | Solved | Realised | Target |
+| Intercept | Solved | Realised | |
 |---|---:|---:|---|
-| `alpha_0` (conversion) | **+0.3125** | 0.6762 | 0.680 ±0.004 solver tol ✅ |
-| `beta_0` (COD) | **−0.1875** | 0.6200 | 0.620 ±0.004 solver tol ✅ |
+| `alpha_0` conversion | +0.2500 | 0.6761 | ✅ |
+| `beta_0` COD | −0.2500 | 0.6192 | ✅ |
+| `gamma_0` RTO | −4.1250 | 0.1631 blended | ✅ |
+| `pi_cod0` pre-window | +0.5156 | 0.6166 | ✅ |
+| `pi_rto0` pre-window | −3.3750 | 0.1671 | ✅ |
 
 | Test | Actual | Target | |
 |---|---:|---|---|
-| CAL-01 COD share of orders | 0.6200 | 0.620 ±0.010 (HARD) | ✅ |
-| CAL-06 checkout conversion | 0.6762 | 0.680 ±0.020 (HARD) | ✅ |
-| CAL-07 % of COD from payment failure | 0.0575 | 0.068 ±0.020 (SOFT) | ✅ |
-| CAL-09 slope immutability | 45 slopes verified, 5 blocks | exact | ✅ |
-| LK-06 declared shrinkage prior | prior=0.165, k=8 | exact | ✅ |
+| CAL-01 COD share | 0.6192 | 0.620 ±0.010 HARD | ✅ |
+| CAL-05 RTO blended | 0.1631 | 0.165 ±0.010 HARD | ✅ |
+| CAL-06 conversion | 0.6761 | 0.680 ±0.020 HARD | ✅ |
+| CAL-03 RTO COD | 0.2512 | 0.240 ±0.025 SOFT | ✅ **EMERGENT** |
+| CAL-04 RTO prepaid | 0.0261 | 0.041 ±0.025 SOFT | ✅ **EMERGENT** |
+| VOL-02b consistency | 0.00e+00 | < 0.001 HARD | ✅ |
+| DQ-14 late-window censoring | 0.3524 | ≥ 0.03 | ✅ |
+| CAL-09 · CAL-10 · LK-06 | — | — | ✅ |
 
-**Funnel (Branch-5 diagnosis).** ADDRESS 12.68% · PAYMENT_PAGE 18.94% · FEE_REVEAL 0.00% ·
-PAYMENT_FAILURE 0.76% · converted 67.62%. Switch-COD is 3.57% of all orders against spec
-§10.3's ~4.2%.
+### CAL-11 — the gate that decides whether the dataset supports the case study
 
-FEE_REVEAL at exactly zero is **correct, not a bug**: baseline `shipping_fee_charged` is 0,
-so the fee term contributes nothing to the conversion logit. The shipping fee is an
-intervention lever, and FEE_REVEAL is the diagnosis waiting for someone to pull it.
+| | |
+|---|---:|
+| naive COD−prepaid gap | **22.51pp** |
+| AME (canonical, decision A6) | **14.70pp** |
+| **selection share** | **0.347** |
+| CAL-11 band | [0.25, 0.45] ✅ |
+| GT-02 (naive > AME **and** CAL-11 passes) | ✅ |
 
-**Point-in-time state (decision A18).** `pit_cod_share` NULL for **38.94%** of sessions —
-those with no prior order — with `pit_has_history` as the missing indicator.
-`pit_rto_rate_shrunk` never NULL, by design. Rule-tier mix LOW 41.0% / MED 51.2% / HIGH 7.8%.
+The dataset carries the planted confounding: a naive crosstab overstates the causal
+effect of COD by roughly a third, which is the project's central claim.
 
-### Note on `fct_payment_attempt` being ~32,000 below spec §15
+### Two failures, both escalated rather than patched
 
-Spec §15 derives ~78,000 from "prepaid-intent sessions × 1.19 attempts", counting prepaid
-intent across **all** sessions. Under decision A26 only sessions that **reach the payment
-page** can touch a payment rail — a session that abandons at the address step never selects
-a method. Prepaid-intent sessions reaching the payment page are ~38,000, so 45,606 attempts
-is right for the ordering that was approved. Spec §15's row estimate predates A26 and
-should be restated; the ordering is not the thing to change.
+**A37 — the AUC ceiling is 0.8745, not 0.74–0.79.** Above GT-05's band and above LK-03's
+0.85 leakage guard, which means LK-03 can no longer tell "something leaked" from "the DGP
+is very predictable". The spec-designated lever (`post_dispatch_shock.noise_sd`) was swept
+rather than moved: at 2.6–3.0 the AUC, CAL-03, CAL-04 *and* the naive gap all land on
+target simultaneously. **Needs a ruling.**
+
+**A36 — mean GMV on orders is 962.70, not 1,000.** Sessions land at 1,004.15, so the
+E[quantity] correction works; the order population then drifts −4.13% because
+`conversion_model.log_order_value = −0.18` selects against expensive carts and EC-01 is
+measured on orders. **Needs a ruling.**
+
+### Measured properties, previously only asserted
+
+| | |
+|---|---|
+| corr(`address_completeness_score`, geo tier rank) | **+0.0002** — decision A28(a) independence, now measured |
+| intra-day repeat sessions | **1.52%** — placements are exact, not day-batched |
+| daily volume vs `demand_index` | correlation > 0.9 — uniform across *customers*, never across days |
 
 ### Open items
 
 | # | Item | Blocks |
 |---|---|---|
-| **A31** | VOL-01 / VOL-02 / CAL-06 jointly knife-edge — **99,441 orders, VOL-01 fails** | Needs a ruling before module 13 |
-| **A28** | Distribution values for modules 08-12, tagged `[A28 PROPOSED]` | Nothing today, but the data already depends on them |
-| A29 | `quantity` Stage 3 → Stage 2 | Spec amendment only; already implemented |
-| A30 | `pit_avg_order_value` sparsity | Record in `docs/05_limitations.md` |
-| A25 / A26 | Ruled; generation-order tables in `docs/` still show the old module 11 | Docs |
-| — | `docs/data_generating_process.md` does not exist; A3 and A25 both owe it documentation | Docs |
-
-### Still provisional
-
-Modules 13-17 do not exist, so **no in-window order resolves** and every `pit_*` value
-reflects pre-window history alone. When the decision-A1 day loop closes, `pit_cod_share` and
-`pit_rto_rate_shrunk` gain in-window history and **all four solved intercepts must be
-re-solved**. The numbers above are a working checkpoint, not a calibration.
+| **A37** | AUC ceiling 0.87 vs 0.74–0.79; `noise_sd` lever swept, recommend 2.8 | Module 19 — economics would inherit the wrong risk structure |
+| **A36** | EC-01 measured on a value-selected order population | Module 19 |
+| **A34** | EC-01: mean GMV vs mean order_value — **contradicts approved A5** | A36 depends on this |
+| **A33** | `[A33 PROPOSED]` delivery distributions for modules 13-17 | Nothing today; data already depends on them |
+| — | `docs/data_generating_process.md` still does not exist (A3, A25, A26 owe it) | Docs |

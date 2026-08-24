@@ -18,3 +18,8 @@ scale:
   # METRO is the binding tier at 22%, so this cannot go below 455.
   n_geographies: 460
   target_orders: 5000
+  # Scaled in the same proportion as the full run (decision A31: this is a knob,
+  # not a target). Leaving it at 155,000 would give the dev scenario 55 sessions
+  # per customer instead of 2.8, which would make repeat-visit behaviour — and
+  # therefore the whole point-in-time story — completely unrepresentative.
+  n_sessions: 7750

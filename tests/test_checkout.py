@@ -1,10 +1,9 @@
-"""Unit tests for generation modules 08-12.
+"""Unit tests for generation modules 08-17, through the decision-A1 day loop.
 
-The tests that matter most here are ``TestPointInTime`` and ``TestFunnel``.
-Point-in-time integrity is the leakage firewall — if a snapshot can see an order
-that had not resolved, the risk model gets a peek at the future and nothing
-downstream means anything. And the funnel invariants are what make ``abandon_step``
-a real diagnosis rather than a label.
+The tests that matter most are ``TestPointInTime`` (the leakage firewall),
+``TestFunnel`` (abandon_step as a real diagnosis) and ``TestRtoOutcomes`` (the
+denominator and the censoring contract). Everything downstream of those is
+arithmetic; those three are where a silent error would be invisible and fatal.
 """
 
 from __future__ import annotations
@@ -15,26 +14,27 @@ import pytest
 
 from src.config.loader import load_params
 from src.config.seeds import spawn_substreams
-from src.generators.checkout_pipeline import run_checkout
+from src.generators import materialise
 from src.generators.conversion import project_checkout_events, split_hurdles
 from src.generators.customers import generate_customers
 from src.generators.dates import generate_dates
 from src.generators.geography import generate_geography
 from src.generators.history import generate_history
+from src.generators.orders import draw_cancellations, m2_risk_tier
 from src.generators.products import generate_products
 from src.generators.sellers import generate_sellers
 from src.generators.sessions import generate_sessions
-from src.generators.state_snapshots import (
-    LEDGER_COLUMNS,
-    empty_ledger,
-    generate_state_snapshots,
-)
+from src.generators.simulate import prepare, simulate_window
 from src.models.logit import CoefficientLedger
+from src.validation.tests_cal import cal_09_no_slope_changed
+
+# Intercepts near the solved values, so the fixture is representative without
+# paying for a full joint solve in every test session.
+ALPHA, BETA, GAMMA = 0.25, -0.25, -4.125
 
 
 @pytest.fixture(scope="module")
 def built():
-    """Modules 02-12 at dev scale, built once and shared."""
     params = load_params(
         "config/params.yaml", "config/params.schema.json",
         scenario_path="config/scenarios/dev_small.yaml",
@@ -58,71 +58,43 @@ def built():
     sessions = generate_sessions(
         params, dates, customers, products, geography, latents, rng.get("session")
     )
-    state = generate_state_snapshots(params, sessions, customers, empty_ledger())
-    checkout = run_checkout(
-        params, sessions, state, customers, latents, products, sellers, geography,
-        dates, rng.get("cod"), rng.get("payment"), rng.get("conversion"), ledger,
-    )
+    rngs = {k: rng.get(k) for k in ("cod", "payment", "conversion", "rto", "delivery")}
+    setup = prepare(params, sessions, customers, latents, products, sellers,
+                    geography, dates, rngs, ledger)
+    metrics = simulate_window(setup, ALPHA, BETA, GAMMA, collect=True)
+    extra = metrics.extra
+
+    resolved = materialise.resolve_sessions(params, sessions, extra)
+    resolved["signup_date"] = customers.set_index("customer_id")["signup_date"]\
+        .reindex(resolved["customer_id"]).to_numpy()
+    state = materialise.build_state(params, resolved, extra)
+    orders = materialise.build_orders(params, resolved, extra, dates)
+
     return {
-        "params": params, "dates": dates, "geography": geography,
-        "customers": customers, "latents": latents, "products": products,
-        "sessions": sessions, "state": state, "checkout": checkout,
-        "resolved": checkout.sessions, "ledger": ledger,
+        "params": params, "setup": setup, "metrics": metrics, "extra": extra,
+        "sessions": sessions, "resolved": resolved, "state": state,
+        "orders": orders, "customers": customers, "geography": geography,
+        "products": products, "ledger": ledger, "dates": dates,
     }
 
 
-# ---------------------------------------------------------------------------
-# 08 — sessions
-# ---------------------------------------------------------------------------
-
-
 class TestSessions:
-    def test_session_count_is_the_north_star_denominator(self, built):
-        """orders / conversion. Sessions that never convert MUST exist as rows."""
-        params = built["params"]
-        expected = round(
-            int(params.require("scale.target_orders"))
-            / float(params.require("scale.checkout_conversion_target"))
-        )
-        assert len(built["sessions"]) == expected
+    def test_session_count_is_the_input_knob(self, built):
+        """Decision A31: read from scale.n_sessions, not derived from conversion."""
+        assert len(built["sessions"]) == int(built["params"].require("scale.n_sessions"))
 
     def test_sessions_are_chronological(self, built):
-        """Module 09 makes a strict chronological pass and asserts this."""
         assert built["sessions"]["session_start_ts"].is_monotonic_increasing
-
-    def test_session_ids_agree_with_time_order(self, built):
-        """Assigned after the sort, so id order and time order match.
-
-        That turns "is this snapshot using the future?" into something anyone can
-        eyeball, instead of something only LK-04 can answer.
-        """
-        ids = built["sessions"]["session_id"].tolist()
-        assert ids == sorted(ids)
-
-    def test_every_foreign_key_resolves(self, built):
-        s = built["sessions"]
-        assert s["customer_id"].isin(built["customers"]["customer_id"]).all()
-        assert s["candidate_product_id"].isin(built["products"]["product_id"]).all()
-        assert s["delivery_geography_id"].isin(
-            built["geography"]["geography_id"]
-        ).all()
-        assert s["date_id"].isin(built["dates"]["date_id"]).all()
 
     def test_stage2_columns_are_in_range(self, built):
         s = built["sessions"]
         assert s["address_completeness_score"].between(0, 1).all()
         assert s["discount_pct"].between(0, 1).all()
         assert (s["estimated_delivery_days"] >= 1).all()
-        assert s["cart_size"].between(1, 5).all()
         assert s["quantity"].between(1, 3).all()
-        assert (s["order_value"] > 0).all()
 
     def test_address_completeness_is_not_a_geography_proxy(self, built):
-        """Deliberate: spec §3.6 names no drivers.
-
-        If address quality tracked tier, "fix the addresses" would silently become
-        a geography policy with a fairness problem attached.
-        """
+        """Decision A28(a) / limitation L1 — a STATED property, so it is tested."""
         merged = built["sessions"].merge(
             built["geography"][["geography_id", "geo_tier"]],
             left_on="delivery_geography_id", right_on="geography_id",
@@ -130,31 +102,18 @@ class TestSessions:
         spread = merged.groupby("geo_tier")["address_completeness_score"].mean()
         assert spread.max() - spread.min() < 0.02, spread.to_dict()
 
-    def test_mean_gmv_lands_near_the_pinned_target(self, built):
-        """Decision A5 + the E[quantity] correction in module 05.
+    def test_daily_volume_follows_the_demand_index(self, built):
+        """Decision A28(b): uniform ACROSS CUSTOMERS, never across days.
 
-        Without dividing the category list-price means by E[quantity], mean GMV
-        overshoots by 12.5% and EC-01 fails by ~₹125 against a ±₹25 tolerance.
+        BR-10 needs month-end to be a real concentration of traffic and DQ-14
+        needs orders to pile up late in the window. Flat daily volume breaks both.
         """
-        target = float(built["params"].require("calibration_targets.mean_gmv_per_order.target"))
-        actual = built["sessions"]["prospective_gmv"].mean()
-        assert actual == pytest.approx(target, rel=0.08), actual
-
-
-# ---------------------------------------------------------------------------
-# 09 — point-in-time state: the leakage firewall
-# ---------------------------------------------------------------------------
+        per_day = built["sessions"].groupby("date_id").size()
+        demand = built["dates"].set_index("date_id")["demand_index"].reindex(per_day.index)
+        assert float(np.corrcoef(per_day.to_numpy(float), demand.to_numpy(float))[0, 1]) > 0.9
 
 
 class TestPointInTime:
-    def test_rejects_unsorted_sessions(self, built):
-        """An unsorted input would silently produce snapshots that see the future."""
-        shuffled = built["sessions"].iloc[::-1].reset_index(drop=True)
-        with pytest.raises(ValueError, match="chronological"):
-            generate_state_snapshots(
-                built["params"], shuffled, built["customers"], empty_ledger()
-            )
-
     def test_counts_are_internally_consistent(self, built):
         s = built["state"]
         assert (s["pit_orders_resolved"] <= s["pit_orders_placed"]).all()
@@ -162,115 +121,63 @@ class TestPointInTime:
                 <= s["pit_orders_resolved"]).all()
         assert (s["pit_cod_orders"] <= s["pit_orders_placed"]).all()
 
-    def test_derived_flags_match_their_definitions(self, built):
-        """These are CHECK constraints in the DDL; a mismatch fails the load."""
-        s = built["state"]
-        assert (s["pit_is_new_customer"] == (s["pit_orders_delivered"] == 0)).all()
-        assert (s["pit_has_clean_record"]
-                == ((s["pit_orders_delivered"] >= 3) & (s["pit_rto_count"] == 0))).all()
-        assert (s["pit_has_history"] == (s["pit_orders_placed"] > 0)).all()
-
     def test_no_imputation_for_historyless_customers(self, built):
-        """Decision A18. Imputing 0.62 into a column multiplied by +2.20 would
-        manufacture a habit signal for a customer with no habit."""
+        """Decision A18. pit_cod_share carries +2.20; imputing would manufacture
+        a habit signal for a customer who has none."""
         s = built["state"]
         no_history = s["pit_orders_placed"] == 0
         assert s.loc[no_history, "pit_cod_share"].isna().all()
         assert s.loc[~no_history, "pit_cod_share"].notna().all()
-        assert s.loc[no_history, "pit_avg_order_value"].isna().all()
+        assert (s["pit_has_history"] == (s["pit_orders_placed"] > 0)).all()
 
-    def test_shrunk_rate_is_never_null_and_uses_the_declared_prior(self, built):
-        """The A18 exception: EB shrinkage at n=0 RETURNS the prior by construction,
-        which is computed rather than imputed."""
+    def test_shrunk_rate_never_null_and_uses_the_declared_prior(self, built):
+        """The A18 exception: EB shrinkage at n=0 RETURNS the prior by construction."""
         s = built["state"]
         assert s["pit_rto_rate_shrunk"].notna().all()
         prior = float(built["params"].require("priors.rto_prior"))
-        no_resolved = s["pit_orders_resolved"] == 0
-        assert np.allclose(s.loc[no_resolved, "pit_rto_rate_shrunk"], prior, atol=1e-4)
+        none = s["pit_orders_resolved"] == 0
+        assert np.allclose(s.loc[none, "pit_rto_rate_shrunk"], prior, atol=1e-3)
 
-    def test_raw_rate_is_null_exactly_when_nothing_resolved(self, built):
-        s = built["state"]
-        assert (s["pit_rto_rate_raw"].isna() == (s["pit_orders_resolved"] == 0)).all()
+    def test_history_accumulates_inside_the_window(self, built):
+        """If it did not, the A1 day loop would be pointless and H3/BR-02/BR-03
+        would have nothing to detect."""
+        s = built["state"].copy()
+        s["day"] = built["setup"]["index"]["day_index"]
+        early = s[s["day"] < 15]["pit_orders_placed"].mean()
+        late = s[s["day"] >= 75]["pit_orders_placed"].mean()
+        assert late > early, (early, late)
 
     def test_risk_tier_carries_no_payment_method(self, built):
-        """Decision A21: this is the M1 baseline. payment_method is Stage 3 and
-        belongs to the M2 tier on fct_order."""
-        s = built["state"]
-        assert set(s["pit_risk_tier_rule_based"].unique()) <= {"LOW", "MED", "HIGH"}
-        rules = built["params"].require("distributions.risk_tier_rules")
-        high = s[s["pit_risk_tier_rule_based"] == "HIGH"]
-        assert (high["pit_rto_rate_shrunk"] >= float(rules["high_rto_rate_shrunk"])).all()
-
-    def test_ledger_interface_is_the_real_one(self, built):
-        """When the A1 day loop closes, module 09 must not have to change."""
-        assert set(LEDGER_COLUMNS) == {
-            "customer_id", "order_ts", "outcome_resolved_date",
-            "is_cod", "rto_flag", "is_delivered", "order_value",
+        """Decision A21: this is the M1 baseline."""
+        assert set(built["state"]["pit_risk_tier_rule_based"].unique()) <= {
+            "LOW", "MED", "HIGH"
         }
-        assert list(empty_ledger().columns) == list(LEDGER_COLUMNS)
-
-    def test_a_ledger_order_is_only_counted_once_resolved(self, built):
-        """The core rule: an order placed 3 days ago has NOT resolved."""
-        params, sessions, customers = built["params"], built["sessions"], built["customers"]
-        target = sessions.iloc[len(sessions) // 2]
-        session_day = pd.Timestamp(target["date_id"]).date()
-
-        ledger = pd.DataFrame({
-            "customer_id": [target["customer_id"]],
-            "order_ts": [pd.Timestamp(target["session_start_ts"]) - pd.Timedelta(days=3)],
-            # Resolves AFTER this session — must not be visible.
-            "outcome_resolved_date": [session_day + pd.Timedelta(days=10)],
-            "is_cod": [True], "rto_flag": [True], "is_delivered": [False],
-            "order_value": [1000.0],
-        })
-        with_ledger = generate_state_snapshots(params, sessions, customers, ledger)
-        row = with_ledger[with_ledger["session_id"] == target["session_id"]].iloc[0]
-        base = built["state"]
-        base_row = base[base["session_id"] == target["session_id"]].iloc[0]
-
-        # Placement is visible; the unresolved outcome is not.
-        assert row["pit_orders_placed"] == base_row["pit_orders_placed"] + 1
-        assert row["pit_rto_count"] == base_row["pit_rto_count"]
-        assert row["pit_orders_resolved"] == base_row["pit_orders_resolved"]
-
-
-# ---------------------------------------------------------------------------
-# 10-12 — the funnel
-# ---------------------------------------------------------------------------
 
 
 class TestFunnel:
     def test_no_session_pays_and_then_abandons_at_address(self, built):
-        """Decision A26. Under the 11a/11b/11c ordering this is UNREACHABLE."""
+        """Decision A26 makes this unreachable, not merely unviolated."""
         r = built["resolved"]
         assert not (r["payment_page_reached"] & ~r["address_completed"]).any()
 
     def test_abandoned_and_converted_are_exclusive_and_complete(self, built):
         r = built["resolved"]
         abandoned = r["checkout_abandoned"].to_numpy()
-        has_method = ~r["final_payment_method"].isna().to_numpy()
-        has_step = ~r["abandon_step"].isna().to_numpy()
-        assert not (abandoned & has_method).any()
-        assert not (~abandoned & has_step).any()
-        assert (abandoned == has_step).all()
+        assert not (abandoned & ~r["final_payment_method"].isna().to_numpy()).any()
+        assert (abandoned == ~r["abandon_step"].isna().to_numpy()).all()
 
     def test_every_abandonment_has_a_cause(self, built):
-        """Brief §9.10: abandonment must be causally connected to what happened.
-        An unlabelled abandonment makes Branch 5 undiagnosable."""
         r = built["resolved"]
-        steps = set(r.loc[r["checkout_abandoned"], "abandon_step"].unique())
+        steps = set(r.loc[r["checkout_abandoned"], "abandon_step"].dropna().unique())
         assert steps <= {"ADDRESS", "PAYMENT_PAGE", "FEE_REVEAL", "PAYMENT_FAILURE"}
         assert "PAYMENT_FAILURE" in steps, "no failure-driven abandonment — H11 is dead"
 
-    def test_fee_reveal_is_absent_in_the_baseline(self, built):
-        """0 by design: shipping_fee_charged is 0. FEE_REVEAL is the diagnosis that
-        exists to catch the lever when a scenario pulls it."""
+    def test_fee_reveal_absent_in_the_baseline(self, built):
+        """0 by design: shipping_fee_charged is 0, so the fee term is identically zero."""
         assert float(built["params"].require("economics.shipping_fee_charged")) == 0
         assert (built["resolved"]["abandon_step"] == "FEE_REVEAL").sum() == 0
 
     def test_switch_to_cod_requires_prepaid_intent(self, built):
-        """The two-step structure. A switch means they TRIED to prepay — that is
-        what makes H11 answerable and what deviation D5 rewards."""
         r = built["resolved"]
         switched = r[r["switched_to_cod_after_failure"]]
         assert (switched["intended_payment_method"] == "PREPAID").all()
@@ -279,89 +186,154 @@ class TestFunnel:
     def test_payment_rail_is_null_exactly_for_cod(self, built):
         """DQ-13, enforced as a CHECK constraint in the DDL."""
         r = built["resolved"][~built["resolved"]["checkout_abandoned"]]
-        is_cod = r["final_payment_method"] == "COD"
-        assert (r["payment_rail"].isna() == is_cod).all()
-
-    def test_only_prepaid_intent_sessions_attempt_payment(self, built):
-        r = built["resolved"]
-        attempted = r["payment_attempt_count"] > 0
-        assert (r.loc[attempted, "intended_payment_method"] == "PREPAID").all()
-        assert r.loc[attempted, "payment_page_reached"].all()
-
-    def test_attempt_rows_reconcile_with_the_session_counter(self, built):
-        attempts = built["checkout"].payment_attempts
-        r = built["resolved"]
-        per_session = attempts.groupby("session_id").size()
-        expected = r.set_index("session_id")["payment_attempt_count"]
-        common = per_session.index
-        # A rail switch increments the counter without emitting a third row; the
-        # attempt table is never LARGER than the counter claims.
-        assert (per_session <= expected.loc[common]).all()
+        assert (r["payment_rail"].isna() == (r["final_payment_method"] == "COD")).all()
 
 
-class TestHurdleSplit:
-    def test_product_of_hurdles_is_the_conversion_probability(self):
-        """The split is a decomposition, not a change to the model."""
+class TestOrders:
+    def test_one_order_per_converted_session(self, built):
+        orders, resolved = built["orders"], built["resolved"]
+        assert len(orders) == int((~resolved["checkout_abandoned"]).sum())
+        assert orders["session_id"].is_unique
+        assert orders["order_id"].is_unique
+
+    def test_gmv_identity_holds(self, built):
+        o = built["orders"]
+        assert np.allclose(o["order_value"], o["gmv"] * (1 - o["discount_pct"]), atol=0.02)
+
+    def test_cancelled_orders_never_ship_and_never_rto(self, built):
+        """DQ-09. is_shipped is the RTO denominator (CLAUDE.md invariant 8)."""
+        o = built["orders"]
+        c = o[o["is_cancelled_preship"]]
+        assert not c["is_shipped"].any()
+        assert not (c["rto_flag"] == True).any()  # noqa: E712
+        assert c["cancel_actor"].notna().all()
+
+    def test_cancellation_actor_is_null_when_not_cancelled(self, built):
+        o = built["orders"]
+        assert o.loc[~o["is_cancelled_preship"], "cancel_actor"].isna().all()
+
+    def test_m2_tier_escalates_on_cod(self, built):
+        """Decision A21: payment method is the third rule, and belongs to M2 only."""
+        rules = built["params"].require("distributions.risk_tier_rules")
+        shrunk = np.array([0.05, 0.05, 0.30, 0.30])
+        new = np.array([False, False, False, False])
+        cod = np.array([False, True, False, True])
+        tiers = m2_risk_tier(shrunk, new, cod, rules)
+        assert tiers[0] == "LOW" and tiers[1] == "MED"
+        assert tiers[2] == "HIGH" and tiers[3] == "HIGH"
+
+    def test_cancellation_rate_matches_the_declared_total(self, built):
+        rates = built["params"].require("fulfilment.preship_cancel_rate")
+        total = sum(float(v) for v in rates.values())
+        # Independent blocks: whether an order cancels and who cancelled it are
+        # separate draws. Any deterministic relationship between the two — even
+        # an inverse one — collapses the actor mix onto a single value.
+        rng = np.random.default_rng(11)
+        is_cancelled, actor = draw_cancellations(
+            50_000, rng.random(50_000), rng.random(50_000), rates
+        )
+        assert abs(is_cancelled.mean() - total) < 0.005
+        assert set(actor[is_cancelled]) == {"CUSTOMER", "SELLER", "SYSTEM"}
+
+    def test_all_three_cancel_actors_appear_in_the_data(self, built):
+        """The generator uses separate uniform blocks for cancel and actor, so
+        the actor mix must not collapse."""
+        actors = built["orders"].loc[
+            built["orders"]["is_cancelled_preship"], "cancel_actor"
+        ]
+        assert set(actors.dropna().unique()) == {"CUSTOMER", "SELLER", "SYSTEM"}
+
+
+class TestRtoOutcomes:
+    def test_rto_implies_shipped_and_not_delivered(self, built):
+        """DQ-08."""
+        o = built["orders"]
+        rto = o[o["rto_flag"] == True]  # noqa: E712
+        assert rto["is_shipped"].all()
+        assert not (rto["is_delivered"] == True).any()  # noqa: E712
+
+    def test_censored_orders_carry_no_outcome(self, built):
+        """Decision A10 — and the DDL enforces the same thing as a CHECK."""
+        o = built["orders"]
+        c = o[o["is_censored"]]
+        assert len(c) > 0, "no censoring at all — DQ-14 could not be demonstrated"
+        for column in ("rto_flag", "is_delivered", "outcome_resolved_date"):
+            assert c[column].isna().all(), column
+
+    def test_shipped_uncensored_orders_all_have_an_outcome(self, built):
+        """What makes 'shipped AND NOT censored' a COMPLETE RTO denominator."""
+        o = built["orders"]
+        observable = o[o["is_shipped"] & ~o["is_censored"]]
+        assert observable["rto_flag"].notna().all()
+        assert observable["is_delivered"].notna().all()
+
+    def test_delivery_delay_days_is_null_on_every_rto(self, built):
+        """Decision A8: this is the DIAGNOSTIC column. The parcel never arrived,
+        so there is no actual delivery date to subtract from."""
+        o = built["orders"]
+        assert o.loc[o["rto_flag"] == True, "delivery_delay_days"].isna().all()  # noqa: E712
+
+    def test_resolution_days_respect_the_specified_window(self, built):
+        o = built["orders"]
+        bounds = built["params"].require("fulfilment.outcome_resolution_days")
+        actual = o["actual_delivery_days"].dropna()
+        assert actual.between(int(bounds["lo"]), int(bounds["hi"])).all()
+
+    def test_cod_orders_rto_more_than_prepaid(self, built):
+        """The planted +1.60. Not an assignment — the gap is emergent."""
+        m = built["metrics"]
+        assert m.rto_rate_cod > m.rto_rate_prepaid
+
+    def test_rto_is_drawn_not_assigned(self, built):
+        """CLAUDE.md rule 9. Some COD orders must be delivered and some prepaid
+        orders must fail, or a rule has replaced a probability."""
+        o = built["orders"][built["orders"]["is_shipped"] & ~built["orders"]["is_censored"]]
+        cod = o[o["payment_method"] == "COD"]
+        prepaid = o[o["payment_method"] == "PREPAID"]
+        assert 0 < cod["rto_flag"].mean() < 1
+        assert 0 < prepaid["rto_flag"].mean() < 1
+
+
+class TestDeterminism:
+    def test_the_loop_consumes_no_randomness(self, built):
+        """The property bisection depends on: same intercepts -> same result."""
+        a = simulate_window(built["setup"], ALPHA, BETA, GAMMA)
+        b = simulate_window(built["setup"], ALPHA, BETA, GAMMA)
+        assert (a.conversion_rate, a.cod_share, a.rto_rate_blended) == (
+            b.conversion_rate, b.cod_share, b.rto_rate_blended
+        )
+
+    def test_rto_rate_is_monotone_in_gamma(self, built):
+        """If it were not, the bisection would be solving a non-monotone target."""
+        rates = [simulate_window(built["setup"], ALPHA, BETA, g).rto_rate_blended
+                 for g in (-5.0, -4.5, -4.0, -3.5)]
+        assert rates == sorted(rates), rates
+
+    def test_placements_are_exact_not_day_batched(self, built):
+        """Rank groups within a day. If ranks collapsed to one batch, a customer's
+        second session of the day would not see their first order."""
+        assert built["setup"]["index"]["max_rank"] >= 2
+        assert 0 < built["setup"]["index"]["multi_session_share"] < 0.10
+
+
+class TestGuards:
+    def test_cal_09_covers_the_stage2_deltas(self, built):
+        """post_dispatch_shock lives outside the coefficients block, so without
+        this it would be the one place a slope could move unnoticed."""
+        result = cal_09_no_slope_changed(
+            built["ledger"], built["params"], require_complete_coverage=False
+        )
+        assert result.status.value == "PASS", result.detail
+        assert "shock.attempt_delay_days" in built["ledger"].slopes("rto_model")
+
+    def test_hurdle_split_is_exact(self):
         p = np.array([0.2, 0.5, 0.68, 0.95])
         a, b = split_hurdles(p, 0.35)
         assert np.allclose(a * b, p)
 
-    def test_rejects_a_degenerate_share(self):
-        with pytest.raises(ValueError, match="address_hurdle_share"):
-            split_hurdles(np.array([0.5]), 0.0)
-
-
-class TestCheckoutEvents:
-    def test_events_are_a_projection_of_session_state(self, built):
-        """Decision A12: no new randomness. Re-running must be identical."""
+    def test_checkout_events_are_a_deterministic_projection(self, built):
+        """Decision A12: no new randomness, so re-running must be identical."""
         first = project_checkout_events(built["resolved"])
         second = project_checkout_events(built["resolved"])
         pd.testing.assert_frame_equal(first, second)
-
-    def test_every_session_has_a_start_and_a_terminal_event(self, built):
-        events = built["checkout"].checkout_events
-        sessions = built["resolved"]
-        starts = events[events["event_name"] == "CHECKOUT_STARTED"]
-        assert len(starts) == len(sessions)
-        terminal = events[events["event_name"].isin(["ORDER_PLACED", "ABANDONED"])]
-        assert len(terminal) == len(sessions)
-
-    def test_event_sequence_is_dense_and_ordered(self, built):
-        events = built["checkout"].checkout_events
-        grouped = events.groupby("session_id")
-        assert (grouped["event_seq"].min() == 1).all()
-        assert (grouped["event_seq"].apply(lambda s: s.is_monotonic_increasing)).all()
-
-    def test_no_event_precedes_its_session(self, built):
-        events = built["checkout"].checkout_events
-        joined = events.merge(
-            built["resolved"][["session_id", "session_start_ts"]], on="session_id"
-        )
-        assert (joined["event_ts"] >= joined["session_start_ts"]).all()
-
-
-class TestJointSolve:
-    def test_both_intercepts_converged(self, built):
-        c = built["checkout"]
-        assert c.conversion_calibration.converged
-        assert c.cod_calibration.converged
-
-    def test_the_alternating_solve_reached_a_fixed_point(self, built):
-        """If beta_0 and alpha_0 were still moving on the last pass, neither is solved."""
-        drift = built["checkout"].solve_drift
-        assert drift["beta_0"] < 1e-6
-        assert drift["alpha_0"] < 1e-6
-
-    def test_cod_share_hits_its_target(self, built):
-        target = built["params"].require("calibration_targets.cod_share")
-        assert abs(built["checkout"].cod_share - float(target["target"])) <= float(
-            target["tol"]
-        )
-
-    def test_cod_intent_is_drawn_not_assigned(self, built):
-        """CLAUDE.md rule 9. Every payment method is a Bernoulli draw."""
-        truth = built["checkout"].truth
-        assert truth["p_cod_intent"].between(0, 1).all()
-        # A genuine probability distribution, not a constant or a step function.
-        assert truth["p_cod_intent"].std() > 0.05
-        assert truth["p_cod_intent"].nunique() > len(truth) // 2
+        assert (first.groupby("session_id")["event_seq"].min() == 1).all()

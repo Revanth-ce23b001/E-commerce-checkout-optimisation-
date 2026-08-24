@@ -32,13 +32,51 @@ scale:
   n_sellers: 1200
   n_products: 8000
   n_geographies: 500
-  target_orders: 100000
-  checkout_conversion_target: 0.68        # -> ~147,059 sessions
+  target_orders: 100000                   # VOL-01 floor. A business target.
+  checkout_conversion_target: 0.68        # CAL-06 target. A business target.
+  # Decision A31: n_sessions is an INPUT KNOB, not a business target. It was
+  # previously derived as target_orders / conversion_target = 147,059, which made
+  # VOL-01 require conversion >= EXACTLY 68.00% -- the midpoint of CAL-06's own
+  # +/-2pp band. Any conversion CAL-06 permits below that failed VOL-01.
+  #
+  # 155,000 clears VOL-01 across the ENTIRE CAL-06 band, with headroom for the
+  # re-solve once the A1 day loop closes:
+  #     conversion 0.660 -> 102,300 orders
+  #     conversion 0.680 -> 105,400 orders
+  #     conversion 0.700 -> 108,500 orders
+  n_sessions: 155000
+
   # Population framing (blueprint 7.2, deviation D1)
-  population_annual_orders: 24000000
-  sample_to_quarter_factor: 60            # 100K is 1.667% of a 6M-order quarter
-  quarter_to_year_factor: 4
-  annualization_factor: 240               # MUST equal 60 x 4
+  population_annual_orders: 24000000      # FIXED business assumption
+
+  # ---------------------------------------------------------------------------
+  # THE ANNUALISATION FACTOR IS DERIVED, NEVER HARD-CODED.
+  #
+  #     factor = population_annual_orders / COUNT(fct_order)
+  #
+  # The old literal 240 was 24,000,000 / 100,000. It silently encoded an
+  # assumption about the SAMPLE SIZE, so changing n_sessions would have inflated
+  # the annual opportunity by ~4.8% -- the 165 Cr headline drifting to ~173 Cr
+  # for no reason but a knob that has nothing to do with the business.
+  #
+  # Total RTO cost x (population / sample) is invariant to sample size, which is
+  # exactly why the factor must be derived rather than pinned.
+  #
+  # The value below is REPORTING ONLY and must never enter a calculation.
+  # EC-08 (HARD) asserts the derived factor lands inside the bounds.
+  # ---------------------------------------------------------------------------
+  annualization_factor_expected: 240
+  annualization_factor_bounds: {lo: 200, hi: 280}   # EC-08, HARD
+
+# Decision A31: VOL-02's old [145,000, 150,000] HARD band was a session-count
+# level derived from a point estimate of conversion. Session count is an input,
+# so a level test on it was testing the knob rather than the data.
+volume_targets:
+  vol_01_min_orders: 100000                          # HARD - the case-study headline
+  vol_02a_session_band: {lo: 145000, hi: 170000}     # SOFT - sanity, not a target
+  # HARD, but an INTERNAL CONSISTENCY check rather than a level check: the
+  # reported conversion rate must actually equal orders / sessions.
+  vol_02b_conversion_consistency_tol: 0.001
 
 # -----------------------------------------------------------------------------
 # CALIBRATION TARGETS - what the emergent data must reproduce (spec 17 CAL/EC).
@@ -236,6 +274,27 @@ distributions:
     high_rto_rate_shrunk: 0.257            # p*, the break-even RTO probability
     med_rto_rate_shrunk: 0.165             # the population blended rate
     med_if_new_customer: true
+    # The THIRD rule of blueprint 9.3's baseline ("payment method + prior RTO +
+    # tenure"). It belongs to M2 only: fct_order.order_risk_tier_rule_based.
+    # It must never touch the Stage-2 pit_risk_tier_rule_based (decision A21).
+    m2_cod_escalates_one_tier: true
+
+  # ===========================================================================
+  # [A33 - PROPOSED, NOT YET APPROVED]  Modules 13-17.
+  # Same status as A27/A28. Required by the spec, never quantified by it.
+  # ===========================================================================
+  delivery:
+    # Transit time, in multiples of the destination cluster's base_delivery_days.
+    # Worse couriers are slower, which is what gives attempt_delay_days its
+    # correlation with courier_reliability_score - and therefore what makes the
+    # Stage-2 shock a real logistics signal rather than pure noise.
+    transit_multiplier_mean: 1.00
+    transit_multiplier_sd: 0.28
+    courier_reliability_transit_weight: 0.45   # per z-unit, NEGATIVE reliability
+    attempt_gap_days: 2                        # between failed delivery attempts
+    rto_initiation_days: 2                     # final failed attempt -> RTO_INITIATED
+    rto_return_days: {dist: lognormal, mu: 1.35, sigma: 0.40}
+    courier_partners: [Bluewing, Raptor Logistics, Nandi Express, Trident Ship, Kestrel]
 
   # Modules 11a / 11b - the two conversion hurdles (decision A26).
   conversion:
