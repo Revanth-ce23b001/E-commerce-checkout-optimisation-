@@ -26,12 +26,16 @@ test:
 	$(PY) -m pytest
 
 # --- gated targets ---------------------------------------------------------
-# Stage 3 onwards is blocked pending decisions A2, A4, A6 and A7-A24.
-# See docs/decision_register.md.
+# config/params.yaml, params.schema.json and both SQL schema files are written.
+# A2, A4, A6, A8, A10, A12 and A13-A24 are ruled. Stage 3 remains blocked on the
+# three load-bearing decisions below. See docs/decision_register.md.
 
-BLOCKED = @echo "BLOCKED: config/params.yaml is not complete." && \
-	echo "Open decisions: A2 (conversion model), A4 (RTO reason driver weights)," && \
-	echo "A6 (GT bands), A7-A24. See docs/decision_register.md." && exit 1
+BLOCKED = @echo "BLOCKED: generator work is gated on three open decisions." && \
+	echo "  A7  - three HARD RTO targets (CAL-03/04/05), one knob (gamma_0)" && \
+	echo "  A9  - DQ-07 reconciliation invariant is unsatisfiable as written" && \
+	echo "  A11 - no latent -> pre-window history parametrisation (blocks module 07)" && \
+	echo "Also A26 (conversion/payment sequencing) before module 12." && \
+	echo "See docs/decision_register.md." && exit 1
 
 dev:
 	$(BLOCKED)

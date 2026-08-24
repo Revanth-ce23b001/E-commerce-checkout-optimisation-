@@ -2,8 +2,16 @@
 
 This module currently implements only the two immutability tests, CAL-09 and CAL-10.
 The remaining CAL tests (COD share, RTO rates, conversion, payment-failure share,
-addressable share) depend on calibration targets and coefficient values that are
-still under review, and are deliberately not written yet.
+addressable share) measure GENERATED DATA and are written alongside their
+generator modules.
+
+CAL-09 covers three model blocks (:data:`MODEL_BLOCKS`): cod_model, rto_model and
+conversion_model. Decision A2 admits a third calibrated intercept -- which spec
+§9.1 already listed as ``conversion_model_alpha0`` -- but grants no new freedom on
+slopes. Three intercepts may be solved; zero slopes may move.
+
+CAL-10 is ACTIVE: the RTO reason weights were approved and frozen under decision
+A4, and ``rto_reasons.frozen_hash`` is set.
 
 Why CAL-09 comes first
 ----------------------
@@ -42,11 +50,16 @@ REASONS_BLOCK = "rto_reasons"
 FROZEN_HASH_KEY = "frozen_hash"
 IMMUTABLE_REASON_KEYS = ("base_weights", "driver_weights", "class_map")
 
+# Every model block whose slopes CAL-09 protects. Three intercepts may be solved
+# (decision A2 admits conversion_model_alpha0, which spec §9.1 already lists in
+# calibrated_intercepts); ZERO slopes may move, in any of the three.
+MODEL_BLOCKS = ("cod_model", "rto_model", "conversion_model")
+
 
 def cal_09_no_slope_changed(
     ledger: CoefficientLedger,
     params: Any,
-    model_blocks: tuple[str, ...],
+    model_blocks: tuple[str, ...] = MODEL_BLOCKS,
 ) -> TestResult:
     """CAL-09 (HARD) — no slope coefficient differs from params.yaml.
 
@@ -60,8 +73,9 @@ def cal_09_no_slope_changed(
     params
         The loaded :class:`~src.config.loader.Params`.
     model_blocks
-        Which model blocks to check, e.g. ``("cod_model", "rto_model")``. Passed in
-        rather than hard-coded so that adding a model block is a config change.
+        Which model blocks to check. Defaults to :data:`MODEL_BLOCKS` — the COD,
+        RTO and conversion models. Still a parameter rather than a hard-coded
+        constant so a test can narrow the scope.
     """
     mismatches: list[str] = []
     unused: list[str] = []
@@ -127,8 +141,9 @@ def cal_10_reason_weights_frozen(params: Any) -> TestResult:
     Asserts that ``base_weights``, ``driver_weights`` and ``class_map`` hash to the
     value frozen at approval time.
 
-    Returns SKIP while the weights are still under review, so the harness runs green
-    without silently claiming a protection that is not yet in force.
+    Returns SKIP only if the weights or the frozen hash are absent, so the harness
+    never silently claims a protection that is not in force. As of decision A4 the
+    weights are approved and the hash is set, so this test is live.
     """
     block = params.get(REASONS_BLOCK, default=None)
     if not block:
@@ -184,7 +199,7 @@ def cal_10_reason_weights_frozen(params: Any) -> TestResult:
 def run_immutability_tests(
     ledger: CoefficientLedger,
     params: Any,
-    model_blocks: tuple[str, ...],
+    model_blocks: tuple[str, ...] = MODEL_BLOCKS,
     results: ResultSet | None = None,
 ) -> ResultSet:
     """Run the CAL immutability tests. Called after every generation run."""

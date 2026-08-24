@@ -35,7 +35,8 @@ from dataclasses import dataclass, field
 import numpy as np
 
 # Structural key name for the intercept term, so it can be told apart from slopes.
-# CAL-09 checks slopes for immutability; intercepts are the two values allowed to move.
+# CAL-09 checks slopes for immutability; intercepts are the only values allowed to
+# move -- three of them: cod_model, rto_model, conversion_model (decision A2).
 INTERCEPT_TERM = "__intercept__"
 
 

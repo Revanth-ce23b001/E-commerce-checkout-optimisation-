@@ -1,0 +1,579 @@
+# =============================================================================
+# params.yaml - THE single source of every business assumption in this project.
+#
+# Spec 13. Nothing in src/ may contain a business literal; if a number matters,
+# it lives here.
+#
+# TWO HARD RULES (spec 13.3, CLAUDE.md rule 1):
+#   1. Every `intercept_solved` field is MACHINE-WRITTEN ONLY. The calibrator
+#      writes it and stamps calibration.dgp_sha256. Hand-editing one breaks
+#      reproducibility and src/config/loader.py will refuse to load the file.
+#   2. Every slope is IMMUTABLE. If a calibration target cannot be reached with
+#      these slopes, that is a FINDING about the Phase 1 assumption set - it is
+#      escalated and documented, never silently fixed. CAL-09 enforces this
+#      against what the generator actually consumed at runtime.
+#
+# Three intercepts may be solved: cod_model, rto_model, conversion_model.
+# See docs/decision_register.md A2 for the ruling that admits the third.
+# =============================================================================
+
+meta:
+  version: "2.0.0"
+  currency: INR
+  window_days: 90
+  window_start: 2026-01-01
+  generator_version: "2.0.0"
+
+# -----------------------------------------------------------------------------
+# SCALE - spec 13.2, 15
+# -----------------------------------------------------------------------------
+scale:
+  n_customers: 55000
+  n_sellers: 1200
+  n_products: 8000
+  n_geographies: 500
+  target_orders: 100000
+  checkout_conversion_target: 0.68        # -> ~147,059 sessions
+  # Population framing (blueprint 7.2, deviation D1)
+  population_annual_orders: 24000000
+  sample_to_quarter_factor: 60            # 100K is 1.667% of a 6M-order quarter
+  quarter_to_year_factor: 4
+  annualization_factor: 240               # MUST equal 60 x 4
+
+# -----------------------------------------------------------------------------
+# CALIBRATION TARGETS - what the emergent data must reproduce (spec 17 CAL/EC).
+# These are TARGETS THE DATA MAY MISS. A miss is a finding, not a licence to tune.
+# -----------------------------------------------------------------------------
+calibration_targets:
+  cod_share:                    {target: 0.620, tol: 0.010, severity: HARD}   # CAL-01
+  prepaid_share:                {target: 0.380, tol: 0.010, severity: HARD}   # CAL-02
+  rto_rate_cod:                 {target: 0.240, tol: 0.015, severity: HARD}   # CAL-03
+  rto_rate_prepaid:             {target: 0.041, tol: 0.008, severity: HARD}   # CAL-04
+  rto_rate_blended:             {target: 0.165, tol: 0.010, severity: HARD}   # CAL-05
+  checkout_conversion:          {target: 0.680, tol: 0.020, severity: HARD}   # CAL-06
+  pct_cod_from_payment_failure: {target: 0.068, tol: 0.020, severity: SOFT}   # CAL-07
+  addressable_share_of_rto:     {target: 0.650, tol: 0.050, severity: SOFT}   # CAL-08
+  mean_gmv_per_order:           {target: 1000,  tol: 25,    severity: HARD}   # EC-01, decision A5
+  median_order_value:           {target: 690,   tol: 60,    severity: SOFT}   # EC-02
+  auc_ceiling:                  {target: 0.760, tol: 0.030, severity: SOFT}   # GT-05
+
+# Decision A5: 1,000 rupees is mean GMV PER ORDER, not mean order_value.
+# order_value = gmv - discount_amount, so mean order_value emerges at ~920.
+# Reported as descriptive figures; not tests.
+reported_not_tested:
+  mean_order_value_expected: 920
+  switch_cod_share_of_final_cod_pp: 3.5    # spec 7.3 framing
+  switch_cod_share_of_all_orders: 0.042    # spec 10.3 framing - decision A16
+
+# -----------------------------------------------------------------------------
+# DISTRIBUTIONS - spec 13.2, 12.1
+# -----------------------------------------------------------------------------
+distributions:
+  geo_tier_weights:      {METRO: 0.22, TIER1: 0.24, TIER2: 0.28, TIER3: 0.26}
+  category_weights:      {FASHION: 0.30, BEAUTY: 0.12, HOME_KITCHEN: 0.15,
+                          MOBILE_ACC: 0.18, ELECTRONICS: 0.10, GROCERY_FMCG: 0.15}
+  category_mean_gmv:     {FASHION: 850, BEAUTY: 650, HOME_KITCHEN: 1150,
+                          MOBILE_ACC: 550, ELECTRONICS: 2900, GROCERY_FMCG: 700}
+  category_gmv_sigma:    {FASHION: 0.55, BEAUTY: 0.50, HOME_KITCHEN: 0.60,
+                          MOBILE_ACC: 0.52, ELECTRONICS: 0.75, GROCERY_FMCG: 0.45}
+  gmv_truncation:        {lo: 149, hi: 60000}
+  seller_rating:         {dist: beta_scaled, a: 6.0, b: 2.2, lo: 2.5, hi: 5.0}
+  product_rating:        {dist: beta_scaled, a: 5.4, b: 2.0, lo: 1.5, hi: 5.0}
+  review_count:          {dist: lognormal, mu: 3.6, sigma: 1.4, max: 25000}
+  pre_window_orders:     {dist: neg_binomial, r: 1.6, p: 0.30, zero_inflation: 0.28}
+  cart_size_weights:     {1: 0.52, 2: 0.24, 3: 0.13, 4: 0.07, 5: 0.04}
+  device_type_weights:   {ANDROID: 0.62, IOS: 0.16, WEB: 0.22}
+  weight_band_weights:   {LIGHT: 0.55, MEDIUM: 0.33, HEAVY: 0.12}
+  # Centring constants used by the logits. Reference points, not slopes.
+  centering:
+    seller_rating_center: 4.30
+    product_rating_center: 4.20
+    est_delivery_days_center: 4
+    discount_pct_center: 0.08
+    discount_pct_unit: 0.10           # coefficients are stated "per 10pp"
+    order_value_scale: 1000           # log(order_value / 1000)
+
+# -----------------------------------------------------------------------------
+# LATENTS - spec 6.1. Hidden from every analyst-visible surface.
+# -----------------------------------------------------------------------------
+latents:
+  correlations: {trust_liquidity: 0.25, intent_liquidity: -0.20, intent_trust: -0.15}
+  liquidity_geo_tier_shift: {METRO: 0.45, TIER1: 0.15, TIER2: -0.15, TIER3: -0.45}
+  price_sensitivity_liquidity_corr: -0.30
+
+# Decision A11 - the latent -> pre-window history parametrisation. PENDING.
+# Module 07 is BLOCKED until this is ruled on. Left null deliberately: a
+# placeholder value here would be an unflagged assumption, the worst failure
+# mode in this project.
+latent_to_history: null
+
+# -----------------------------------------------------------------------------
+# COD MODEL - spec 7.2. STEP A: intent.
+# -----------------------------------------------------------------------------
+cod_model:
+  intercept_solved: null                   # machine-written; expected ~ +0.30
+  coefficients:                            # FIXED A PRIORI - CAL-09 enforces
+    latent_trust: -0.55
+    latent_liquidity: -0.45
+    latent_intent: 0.40
+    latent_price_sensitivity: 0.12
+    pit_cod_share: 2.20
+    log1p_prepaid_success: -0.35
+    is_new_customer: 0.70
+    log1p_orders_delivered: -0.18
+    payment_failure_rate: 1.10
+    has_saved_instrument: -0.60
+    geo_tier: {METRO: -0.45, TIER1: -0.15, TIER2: 0.25, TIER3: 0.55}
+    cod_cultural_index_z: 0.30
+    log_order_value: 0.28
+    log_order_value_sq: -0.12
+    seller_rating_centered: -0.35
+    product_rating_centered: -0.30
+    log1p_review_count_centered: -0.12
+    est_delivery_days_centered: 0.09
+    discount_pct_centered: 0.15
+    cart_size_ge3: 0.22
+    category: {FASHION: 0.30, BEAUTY: 0.10, HOME_KITCHEN: 0.05,
+               MOBILE_ACC: 0.15, ELECTRONICS: -0.35, GROCERY_FMCG: -0.10}
+    is_month_end: 0.14
+  noise_sd: 0.35
+
+# -----------------------------------------------------------------------------
+# RTO MODEL - spec 8.2. Two stages.
+# -----------------------------------------------------------------------------
+rto_model:
+  intercept_solved: null                   # machine-written. NOT a spec constant.
+  coefficients:                            # FIXED A PRIORI - CAL-09 enforces
+    is_cod: 1.60                           # *** THE PLANTED CAUSAL EFFECT ***
+    paid_via_switch: -0.45
+    pit_rto_rate_shrunk: 2.80
+    latent_intent: 0.70
+    latent_liquidity: -0.55
+    latent_trust: -0.30
+    is_new_customer: 0.45
+    log1p_orders_delivered: -0.22
+    pit_cod_share: 0.35
+    geo_tier: {METRO: -0.35, TIER1: -0.10, TIER2: 0.20, TIER3: 0.45}
+    serviceability_z: -0.25
+    address_completeness: -1.40
+    seller_sla_breach_rate: 1.20
+    seller_rating_centered: -0.28
+    product_rating_centered: -0.15
+    log1p_review_count_centered: -0.05     # PLANTED NULL - GT-04 must not reject zero
+    log_order_value: 0.15
+    discount_pct_centered: 0.18
+    cart_size_ge3: 0.25
+    est_delivery_days_centered: 0.11
+    category: {FASHION: 0.35, BEAUTY: 0.05, HOME_KITCHEN: 0.00,
+               MOBILE_ACC: 0.10, ELECTRONICS: -0.20, GROCERY_FMCG: -0.15}
+    month_end_x_cod: 0.30
+  post_dispatch_shock:                     # Stage 2 - exists only after dispatch
+    courier_reliability_z_neg: 0.40        # delta_1
+    attempt_delay_days: 0.22               # delta_2 - decision A8: RENAMED
+    seller_dispatch_late: 0.25             # delta_3
+    noise_sd: 0.85                         # *** the AUC ceiling lever ***
+
+# -----------------------------------------------------------------------------
+# CONVERSION MODEL - decision A2. Minimal 7-slope behavioural model.
+#
+# Governs ADDRESS-step and PAYMENT_PAGE abandonment ONLY. Payment-failure
+# abandonment is produced by module 11 and must NOT be double-counted here.
+# The third calibrated intercept is sanctioned by spec 9.1, which already lists
+# conversion_model_alpha0 in calibrated_intercepts.
+#
+# These seven map to blueprint 3 Branch 5 (checkout friction): fee reveal,
+# address friction, promise length, device. Conversion is not a hypothesis-
+# bearing surface in Phase 1, so it does not get 21 slopes.
+# -----------------------------------------------------------------------------
+conversion_model:
+  intercept_solved: null                   # machine-written; pinned to CAL-06 68%
+  coefficients:                            # FIXED A PRIORI - CAL-09 extended to cover these
+    pit_is_new_customer: -0.35
+    log_order_value: -0.18
+    address_completeness: 0.90
+    est_delivery_days_centered: -0.07
+    shipping_fee_charged_gt0: -0.45        # the fee-reveal shock
+    device_web: -0.25
+    cart_size_ge3: -0.12
+  noise_sd: 0.30
+
+# -----------------------------------------------------------------------------
+# PAYMENT FAILURE - spec 10.2. Runs BEFORE the conversion model.
+# -----------------------------------------------------------------------------
+payment_failure:
+  rail_mix: {UPI_INTENT: 0.34, UPI_COLLECT: 0.22, CARD: 0.21,
+             NETBANKING: 0.13, WALLET: 0.10}
+  first_attempt_failure: {UPI_INTENT: 0.06, UPI_COLLECT: 0.27, CARD: 0.18,
+             NETBANKING: 0.29, WALLET: 0.05}
+  customer_failure_multiplier: 0.80        # x (1 + 0.8 * pit_payment_failure_rate)
+  downtime_hour_share: 0.03
+  downtime_multiplier: 2.20
+  p_retry: 0.45
+  retry_success: 0.60
+  terminal: {switch_to_cod: 0.70, switch_rail: 0.10, abandon: 0.20}
+  switch_rail_success: 0.85
+  failure_reason_mix: {TIMEOUT: 0.31, BANK_DECLINE: 0.24, OTP_FAILURE: 0.19,
+                       PSP_DOWNTIME: 0.12, INSUFFICIENT_FUNDS: 0.09, USER_CANCELLED: 0.05}
+
+# -----------------------------------------------------------------------------
+# RTO REASONS - spec 11. Decision A3 (log transform) + A4 (driver weights).
+#
+#   score(r) = log(base_weight[r]) + sum_d driver_weight[r][d] * driver_value[d]
+#   P(r)     = softmax(score) across the ten reasons, within each RTO order
+#
+# The log transform (decision A3) is a correction to the MATHEMATICAL
+# IMPLEMENTATION so the stated base weights are the actual zero-driver
+# probabilities. It is NOT a change to the intended distribution.
+#
+# The softmax normalises across reasons WITHIN an order. NO class-level
+# renormalisation is applied: the ADDRESSABLE/STRUCTURAL split is MEASURED from
+# the realised draws, never forced. CAL-08 (SOFT) measures it on RTO *cost*.
+# If it lands at 61/39, that is reported as a finding. Below 50% -> escalate.
+#
+# These weights are FROZEN at approval. CAL-10 (HARD) enforces it.
+# They will NOT be tuned to make CAL-08 pass.
+# -----------------------------------------------------------------------------
+rto_reasons:
+  base_weights:
+    CUSTOMER_REFUSED_CHANGED_MIND: 0.22
+    CUSTOMER_UNREACHABLE_NO_ANSWER: 0.14
+    ADDRESS_INCORRECT_INCOMPLETE: 0.13
+    INSUFFICIENT_CASH_AT_DELIVERY: 0.11
+    NEVER_ORDERED_LOW_INTENT: 0.05
+    COURIER_OPERATIONAL_FAILURE: 0.10
+    CUSTOMER_UNAVAILABLE_GENUINE: 0.09
+    PINCODE_SERVICEABILITY_FAILURE: 0.08
+    DELIVERY_ATTEMPTED_OUTSIDE_WINDOW: 0.05
+    OTHER_UNCLASSIFIED: 0.03
+  class_map:
+    CUSTOMER_REFUSED_CHANGED_MIND: ADDRESSABLE
+    CUSTOMER_UNREACHABLE_NO_ANSWER: ADDRESSABLE
+    ADDRESS_INCORRECT_INCOMPLETE: ADDRESSABLE
+    INSUFFICIENT_CASH_AT_DELIVERY: ADDRESSABLE
+    NEVER_ORDERED_LOW_INTENT: ADDRESSABLE
+    COURIER_OPERATIONAL_FAILURE: STRUCTURAL
+    CUSTOMER_UNAVAILABLE_GENUINE: STRUCTURAL
+    PINCODE_SERVICEABILITY_FAILURE: STRUCTURAL
+    DELIVERY_ATTEMPTED_OUTSIDE_WINDOW: STRUCTURAL
+    OTHER_UNCLASSIFIED: STRUCTURAL
+  # 22 declared coefficients across 8 reasons; 2 reasons deliberately flat.
+  # The two C-class coefficients are declared at 0.00 rather than deleted, so the
+  # record shows they were considered and ruled to zero (decision A4).
+  driver_weights:
+    CUSTOMER_REFUSED_CHANGED_MIND:
+      latent_intent_z: 0.45
+      discount_pct_centered: 0.20
+      est_delivery_days_centered: 0.10
+      cart_size_ge3: 0.25
+    CUSTOMER_UNREACHABLE_NO_ANSWER:
+      latent_intent_z: 0.30
+      pit_is_new_customer: 0.35
+      geo_tier_tier3: 0.30
+    ADDRESS_INCORRECT_INCOMPLETE:
+      address_completeness: -1.60          # dominant driver; BR-08 depends on it
+      serviceability_z: -0.35
+      pit_is_new_customer: 0.00            # C-class, RULED TO ZERO (decision A4)
+    INSUFFICIENT_CASH_AT_DELIVERY:
+      latent_liquidity_z: -0.55
+      is_month_end: 0.40
+      log_order_value: 0.30
+    NEVER_ORDERED_LOW_INTENT:
+      latent_intent_z: 0.70
+      pit_is_new_customer: 0.40
+      cart_size_ge3: 0.30
+    COURIER_OPERATIONAL_FAILURE:
+      courier_reliability_z: -0.55
+      attempt_delay_days_z: 0.00           # C-class, RULED TO ZERO (decision A4)
+    CUSTOMER_UNAVAILABLE_GENUINE: {}       # deliberately flat - genuine randomness
+    PINCODE_SERVICEABILITY_FAILURE:
+      serviceability_z: -0.75
+      geo_tier_tier3: 0.35
+    DELIVERY_ATTEMPTED_OUTSIDE_WINDOW:
+      courier_reliability_z: -0.35
+      attempt_delay_days_z: 0.45
+    OTHER_UNCLASSIFIED: {}                 # deliberately flat
+  # Hard gates - spec 11.2. Enforced, not hoped for.
+  gates:
+    INSUFFICIENT_CASH_AT_DELIVERY:
+      requires_payment_method: COD         # DQ-11: zero probability on prepaid
+    NEVER_ORDERED_LOW_INTENT:
+      suppress_if_pit_orders_delivered_gte: 5
+  # CAL-10 (HARD): sha256 over {base_weights, driver_weights, class_map}.
+  # Written at approval time. Any later edit fails the test.
+  frozen_hash: "35774eca8875a3575d238dc56dd376950dfbaaa1de8978a6db5bbdec543afb9b"
+  # Decision A22 - ndr_code enumeration, mapped deterministically from rto_reason.
+  ndr_code_map:
+    CUSTOMER_REFUSED_CHANGED_MIND: CUSTOMER_REFUSED
+    CUSTOMER_UNREACHABLE_NO_ANSWER: CUSTOMER_UNREACHABLE
+    ADDRESS_INCORRECT_INCOMPLETE: ADDRESS_INCOMPLETE
+    INSUFFICIENT_CASH_AT_DELIVERY: CASH_NOT_READY
+    NEVER_ORDERED_LOW_INTENT: CUSTOMER_REFUSED
+    COURIER_OPERATIONAL_FAILURE: COURIER_OPERATIONAL
+    CUSTOMER_UNAVAILABLE_GENUINE: CUSTOMER_UNAVAILABLE
+    PINCODE_SERVICEABILITY_FAILURE: OUT_OF_DELIVERY_AREA
+    DELIVERY_ATTEMPTED_OUTSIDE_WINDOW: ATTEMPT_OUTSIDE_WINDOW
+    OTHER_UNCLASSIFIED: OTHER
+
+# -----------------------------------------------------------------------------
+# ECONOMICS - spec 12.2, blueprint 6.4 registry
+# -----------------------------------------------------------------------------
+economics:
+  platform_discount_pct: 0.080
+  cogs_ratio_mean: 0.750
+  cogs_ratio_sd: 0.045
+  cogs_ratio_bounds: {lo: 0.60, hi: 0.86}
+  forward_freight_base: {METRO: 62, TIER1: 72, TIER2: 86, TIER3: 99}
+  forward_freight_weight_factor: {LIGHT: 0.85, MEDIUM: 1.00, HEAVY: 1.45}
+  forward_freight_noise_sd: 6
+  reverse_freight_multiplier: 1.09
+  reverse_freight_noise_sd: 8
+  packaging: {LIGHT: 9, MEDIUM: 13, HEAVY: 21}
+  packaging_noise_sd: 1.5
+  pg_fee_rate: 0.018
+  pg_fee_rate_by_rail: {UPI_INTENT: 0.009, UPI_COLLECT: 0.009, CARD: 0.021,
+                        NETBANKING: 0.016, WALLET: 0.019}
+  cod_handling_rate: 0.015
+  cod_handling_fixed: 8
+  cod_failed_attempt_fee: 14
+  reverse_handling_base: 35
+  reverse_handling_noise_sd: 4
+  shrink_rate_by_category: {FASHION: 0.12, BEAUTY: 0.10, GROCERY_FMCG: 0.20,
+                            HOME_KITCHEN: 0.06, MOBILE_ACC: 0.04, ELECTRONICS: 0.03}
+  support_ndr_rto: 18
+  support_ndr_per_extra_attempt: 6
+  support_delivered: 2
+  wc_annual_rate: 0.14
+  wc_days_blocked: {dist: lognormal, mu: 3.36, sigma: 0.22}   # mean ~29.5 days
+  ops_allocation_delivered: 10
+  shipping_fee_charged: 0                  # baseline: free shipping
+  cod_fee_charged: 0                       # baseline: no COD fee. INTERVENTION LEVER
+  # Decision A23 - cogs_value is the goods value used by the outcome-independent
+  # cost lines (shrink, working capital). It is the COUNTERFACTUAL cogs, computed
+  # as if delivered, because on an RTO net_revenue is zero yet the goods moved.
+  cogs_value_basis: net_revenue_if_delivered
+  # Decision A23 - pre-ship cancelled orders carry ZERO on every cost line.
+  # Nothing was dispatched, nothing was collected, prepaid is refunded.
+  preship_cancel_economics: zero_all_lines
+  # Reconciliation targets at a 1,000-rupee GMV order (spec 12.4).
+  reconciliation:
+    prepaid_delivered_cm:   {target: 112,  tol: 4,  severity: HARD}   # EC-03
+    cod_delivered_cm:       {target: 107,  tol: 4,  severity: HARD}   # EC-04
+    cod_rto_cash_loss:      {target: -309, tol: 12, severity: HARD}   # EC-05
+    cod_rto_economic_cost:  {target: -416, tol: 15, severity: HARD}   # EC-06
+    breakeven_rto_prob:     {target: 0.257, tol: 0.008}
+    annualised_exposure_cr: {target: 164, lo: 150, hi: 180, severity: SOFT}  # EC-07
+
+# -----------------------------------------------------------------------------
+# FULFILMENT - spec 13.2
+# -----------------------------------------------------------------------------
+fulfilment:
+  preship_cancel_rate: {customer: 0.021, seller: 0.014, system: 0.005}
+  max_delivery_attempts: 3
+  dispatch_lag_days: {dist: lognormal, mu: 0.15, sigma: 0.45}
+  outcome_resolution_days: {lo: 4, hi: 25}     # CLAUDE.md invariant 7
+  seller_dispatch_late_threshold_days: 2
+
+# -----------------------------------------------------------------------------
+# CENSORING - decision A10 (RULED)
+#
+# Orders whose outcome would resolve after the last day of the window are
+# censored: is_censored = TRUE, and rto_flag / is_delivered /
+# actual_delivery_days / outcome_resolved_date are all NULL.
+#
+# RTO-rate denominators (CAL-03/04/05) are shipped AND NOT censored.
+# Censored count is reported separately.
+#
+# DQ-14 requires censoring to be PRESENT: >= 3% of late-window orders.
+# Phase 1 11 needs it to DEMONSTRATE maturation bias rather than assert it.
+# -----------------------------------------------------------------------------
+censoring:
+  enabled: true
+  rto_denominator: shipped_and_not_censored
+  late_window_definition_days: 25          # last 25 days of the window
+  min_censored_share_of_late_window: 0.03  # DQ-14 floor
+
+# -----------------------------------------------------------------------------
+# IMPUTATION - decision A18 (own judgement)
+#
+# ONE RULE: every rate feature with a zero denominator imputes to its declared
+# population prior. Never to zero (which asserts evidence that does not exist),
+# and never to a value computed from realised outcomes (which would leak).
+# Every prior below is a DECLARED CONSTANT, not measured from generated data.
+# -----------------------------------------------------------------------------
+imputation:
+  pit_cod_share_prior: 0.620
+  pit_rto_rate_prior: 0.165                # decision A19: also the EB prior mean
+  pit_payment_failure_rate_prior: 0.175
+  pit_avg_order_value_prior: 920           # mean order_value, decision A5
+  shrinkage_k: 8                           # spec 3.7
+
+# -----------------------------------------------------------------------------
+# CALIBRATION SEARCH - solver configuration. Decisions A13, A14, A15.
+# These are SOLVER settings, not business assumptions.
+# -----------------------------------------------------------------------------
+calibration_search:
+  cod_model:
+    bracket: [-2.0, 2.0]                   # spec 7.3; beta_0 expected ~ +0.30
+    loop_modules: [10, 11, 12, 13]         # decision A15: 08-09 invariant, cached
+    target: cod_share
+  rto_model:
+    bracket: [-6.0, 0.0]                   # decision A14: spec gave no bracket
+    loop_modules: [15, 16, 17]
+    target: rto_rate_blended
+  conversion_model:
+    bracket: [-4.0, 4.0]
+    loop_modules: [12]
+    target: checkout_conversion
+  # Decision A13: bisect on the REALISED draw using common random numbers, which
+  # makes the realised share a monotone step function of the intercept. Tolerance
+  # scales with n, because +/-0.004 is finer than one order's worth at dev scale.
+  #   tol = max(share_tolerance_floor, tolerance_n_scaling / sqrt(n_orders))
+  share_tolerance_floor: 0.004
+  tolerance_n_scaling: 1.5
+  max_iterations: 60
+
+# -----------------------------------------------------------------------------
+# GROUND TRUTH - decision A6 (RULED). The COD effect is DERIVED, not asserted.
+#
+# gamma_0 is whatever the calibrator solves to satisfy CAL-03/04/05. It is NOT a
+# spec constant and is never moved to make a marginal effect land on 13.4pp.
+#
+# The canonical effect is the AVERAGE MARGINAL EFFECT over the actual generated
+# population of shipped COD orders:
+#   AME = mean_i[ logistic(logit_i) - logistic(logit_i - 1.60) ]
+# Whatever it is - 12.4, 13.4, 14.1 - that is the truth.
+# -----------------------------------------------------------------------------
+ground_truth:
+  canonical_cod_effect: average_marginal_effect
+  # GT-03 re-anchored RELATIVELY, so the test keeps its purpose at any AME value.
+  # The old hard-coded [15,19]pp band became invalid once gamma_0 > -3.00: the
+  # band would then contain the truth, so an estimate that fully recovered the
+  # unobservable would PASS - inverting what the test exists to do.
+  #   PASS if AME < adjusted < naive
+  #   AND    (adjusted - AME) / (naive - AME) >= 0.35
+  gt_03:
+    rule: ame_lt_adjusted_lt_naive
+    min_gap_closed: 0.35
+  gt_02:
+    rule: naive_gap_gt_ame                 # was "> 13.4"; now relative
+    naive_gap_band_pp: [18.5, 21.5]
+  gt_05:
+    auc_ceiling_band: [0.74, 0.79]
+    model_within: 0.03
+  lk_03_auc_ceiling: 0.85                  # a safe-feature model above this = leak
+
+# -----------------------------------------------------------------------------
+# LEAKAGE GUARD - spec 4.2, 4.4. LK-01 and LK-02 assert against these lists.
+# -----------------------------------------------------------------------------
+leakage_guard:
+  safe_feature_whitelist:
+    # Stage 1 - known before checkout opens
+    - pit_tenure_days
+    - pit_orders_placed
+    - pit_orders_delivered
+    - pit_orders_resolved            # decision A20 - added as a real column
+    - pit_rto_count
+    - pit_rto_rate_raw
+    - pit_rto_rate_shrunk
+    - pit_cod_orders
+    - pit_cod_share
+    - pit_prepaid_success_count
+    - pit_payment_failure_count
+    - pit_payment_failure_rate
+    - pit_days_since_last_order
+    - pit_avg_order_value
+    - pit_is_new_customer
+    - pit_has_clean_record
+    - pit_risk_tier_rule_based       # decision A21 - Stage 1/2 version only
+    - has_saved_prepaid_instrument
+    - age_bucket
+    - acquisition_channel
+    - geo_tier
+    - serviceability_score
+    - courier_reliability_score
+    - cod_cultural_index
+    - category
+    - list_price
+    - product_rating
+    - review_count
+    - seller_rating
+    - seller_rating_count
+    - seller_sla_breach_rate
+    - is_returnable
+    - day_of_week
+    - is_month_end_window
+    # Stage 2 - during checkout, before payment-method selection
+    - cart_size
+    - cart_value
+    - order_value
+    - discount_pct
+    - estimated_delivery_days
+    - address_completeness_score
+    - device_type
+    - delivery_geography_id
+    - hour_of_day
+    # Stage 3 - M2 (post-selection) model ONLY. M1 must project these away.
+    - payment_method
+    - paid_via_switch
+    - payment_attempt_count
+    # Keys and target, permitted in the view
+    - session_id
+    - customer_id
+    - session_start_ts
+    - rto_flag
+    - is_shipped
+  hard_blocked:
+    - delivery_attempts
+    - actual_delivery_days
+    - delivery_delay_days
+    - attempt_delay_days             # decision A8 - Stage 4 shock input, never a feature
+    - rto_reason
+    - rto_reason_class
+    - ndr_code
+    - order_status
+    - is_delivered
+    - is_cancelled_preship
+    - cancel_actor
+    - is_censored
+    - outcome_resolved_date
+    - contribution_margin
+    - rto_cash_loss
+    - foregone_cm
+    - rto_economic_cost
+    - counterfactual_cm_if_delivered
+    - clv_estimate
+    - hist_orders_final
+    - hist_rto_rate_final
+    - hist_cod_share_final
+    - analytics_segment
+    - order_risk_tier_rule_based     # decision A21 - M2 baseline, holds payment_method
+    - latent_trust
+    - latent_liquidity
+    - latent_intent
+    - latent_price_sensitivity
+    - true_cod_propensity
+    - p_convert
+    - p_cod_intent
+    - p_rto_precheckout
+    - p_rto_final
+    - post_dispatch_shock
+
+# -----------------------------------------------------------------------------
+# SEED - spec 16.1. CLAUDE.md invariant 11: APPEND ONLY, never insert.
+# -----------------------------------------------------------------------------
+seed:
+  master: 20260115
+  substreams: [date, geography, seller, product, customer, latent, history,
+               session, cod, payment, conversion, order, cancel, rto,
+               delivery, reason, economics]
+
+# -----------------------------------------------------------------------------
+# CALIBRATION STAMP - machine-written by the calibrator. Never hand-edit.
+# loader.py refuses to load solved intercepts whose dgp_sha256 does not match the
+# current file, which catches both a hand-edited intercept and a slope edited
+# after calibration.
+# -----------------------------------------------------------------------------
+calibration:
+  dgp_sha256: null
+  calibration_run_id: null
+  calibrated_at_utc: null
