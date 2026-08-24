@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -37,7 +38,7 @@ from src.generators.history import generate_history  # noqa: E402
 from src.generators.products import generate_products  # noqa: E402
 from src.generators.sellers import generate_sellers  # noqa: E402
 from src.generators.sessions import generate_sessions  # noqa: E402
-from src.generators.simulate import prepare, simulate_window, solve_intercepts  # noqa: E402
+from src.generators.simulate import prepare, simulate_window, solve_all  # noqa: E402
 from src.models.logit import CoefficientLedger, logistic  # noqa: E402
 from src.validation.tests_cal import cal_09_no_slope_changed, cal_11_selection_share  # noqa: E402
 from src.validation.tests_lk import lk_06_shrinkage_prior_is_declared  # noqa: E402
@@ -99,10 +100,18 @@ def main(argv: list[str] | None = None) -> int:
         params, sessions, customers, latents, products, sellers, geography,
         dates, rngs, ledger,
     )
-    solved = solve_intercepts(setup, params)
+    solved = solve_all(setup, params, history)
     metrics = simulate_window(
-        setup, solved["alpha_0"], solved["beta_0"], solved["gamma_0"], collect=True
+        setup, solved["alpha_0"], solved["beta_0"], solved["gamma_0"],
+        solved["price_scalar"], solved["noise_sd"], collect=True,
     )
+    # The scalar is a LEVEL: it multiplies every list price, leaving the category
+    # ratios untouched. Applied to the stored tables so dim_product and
+    # fct_checkout_session agree with what the loop actually simulated.
+    scalar = solved["price_scalar"]
+    products["list_price"] = (products["list_price"] * scalar).round(2)
+    for column in ("cart_value", "prospective_gmv", "order_value"):
+        sessions[column] = (sessions[column] * scalar).round(2)
     extra = metrics.extra
 
     print("       materialising tables ...", flush=True)
@@ -124,6 +133,9 @@ def main(argv: list[str] | None = None) -> int:
         "fct_order": orders,
         "fct_payment_attempt": attempts,
     }
+    # Not a table: carried through so the A36 ratio check can compare the
+    # realised category mix against what params.yaml declares.
+    declared_means = params.require("distributions.category_mean_gmv")
 
     if not args.no_write:
         OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -131,7 +143,8 @@ def main(argv: list[str] | None = None) -> int:
             frame.to_parquet(OUT_DIR / f"{name}.parquet", index=False)
         print(f"\nwrote {len(tables)} table(s) to {OUT_DIR}")
 
-    report(params, setup, tables, history, solved, metrics, ledger)
+    report(params, setup, {**tables, "_declared_category_means": declared_means},
+           history, solved, metrics, ledger)
     return 0
 
 
@@ -160,7 +173,7 @@ def report(params, setup, tables, history, solved, m, ledger) -> None:
     print(f"   (annualization_factor_expected = "
           f"{params.require('scale.annualization_factor_expected')}, reporting only)")
 
-    print("\n3. JOINT SOLVE — 3 in-window intercepts")
+    print("\n3. SEVEN-WAY JOINT SOLVE — every level; zero slopes")
     for name, c in solved["calibrations"].items():
         print(f"   [{'PASS' if c.converged else 'FAIL'}] {c.describe()}")
     print(f"   drift on the final pass: "
@@ -203,9 +216,13 @@ def report(params, setup, tables, history, solved, m, ledger) -> None:
         pre = roc_auc_score(e["rto_flag"][d], e["p_rto_precheckout"][d])
         fin = roc_auc_score(e["rto_flag"][d], e["p_rto_final"][d])
         band = params.require("ground_truth.gt_05.auc_ceiling_band")
-        print(f"   AUC of truth.p_rto_precheckout  {pre:.4f}  "
-              f"{'PASS' if band[0] <= pre <= band[1] else 'FAIL — see decision A37'}")
+        guard = float(params.require("ground_truth.lk_03_auc_ceiling"))
+        print(f"   AUC of truth.p_rto_precheckout  {pre:.4f}  band [{band[0]}, {band[1]}]  "
+              f"{'PASS' if band[0] <= pre <= band[1] else 'FAIL'}")
         print(f"   AUC of truth.p_rto_final        {fin:.4f}  (includes the shock)")
+        print(f"   LK-03 tripwire margin           {guard - pre:+.4f}  "
+              f"(guard {guard} - ceiling)  "
+              f"{'PASS' if guard - pre >= 0.05 else 'FAIL — detector still blunt'}")
     except ImportError:
         print("   scikit-learn not available")
 
@@ -221,14 +238,23 @@ def report(params, setup, tables, history, solved, m, ledger) -> None:
     print(f"   share of late-window orders     {share:.4f}  floor {floor}  "
           f"{'PASS' if share >= floor else 'FAIL'}")
 
-    print("\n8. ORDER VALUE (decision A34 — both reported)")
+    print("\n8. ORDER VALUE — decision A34: ₹1,000 is GMV (Phase 1 §6.5)")
+    for label, value, key in (
+        ("EC-01  mean GMV per order", m.mean_gmv, "mean_gmv_per_order"),
+        ("EC-01b mean order_value  ", m.mean_order_value, "mean_order_value_per_order"),
+    ):
+        target = t[key]
+        ok = abs(value - float(target["target"])) <= float(target["tol"])
+        print(f"   [{'PASS' if ok else 'FAIL'}] {label}  {value:8.2f}  "
+              f"target {float(target['target']):.0f} +/-{float(target['tol']):.0f} "
+              f"({target['severity']})")
+    scalar = solved["price_scalar"]
     conv = e["converted"]
-    print(f"   sessions: mean gmv {setup['gmv'].mean():8.2f}   "
-          f"mean order_value {setup['order_value'].mean():8.2f}")
-    print(f"   ORDERS  : mean gmv {setup['gmv'][conv].mean():8.2f}   "
-          f"mean order_value {setup['order_value'][conv].mean():8.2f}")
-    print(f"   conversion selects on value: "
-          f"{100*(setup['gmv'][conv].mean()/setup['gmv'].mean()-1):+.2f}% on gmv  <- A36")
+    session_mean = float(setup["gmv"].mean() * scalar)
+    print(f"   price_scalar solved         {scalar:.6f}   <- A36, a LEVEL")
+    print(f"   sessions mean GMV           {session_mean:8.2f}")
+    print(f"   conversion selects on value {100*(m.mean_gmv/session_mean-1):+.2f}%"
+          f"  (why the scalar is needed)")
 
     print("\n9. GUARDS")
     print(f"   [{cal_09_no_slope_changed(ledger, params, require_complete_coverage=False).status.value}]"
@@ -240,6 +266,9 @@ def report(params, setup, tables, history, solved, m, ledger) -> None:
           f"   <- A28(a): stated independence, measured")
     print(f"   [INFO] intra-day repeat sessions {100*setup['index']['multi_session_share']:.2f}%"
           f"  (placements are exact, not day-batched)")
+    ratios = category_ratios(tables)
+    print(f"   [INFO] implied per-category scalar, max spread "
+          f"{ratios:.2e}   <- A36: the SCALAR moved, the RATIOS did not")
     print(rule)
 
 
@@ -251,6 +280,30 @@ def causal_effects(params, e, m) -> tuple[float, float]:
     lp = np.log(p / (1 - p))
     ame = float(np.mean(logistic(lp) - logistic(lp - beta))) * 100
     return (m.rto_rate_cod - m.rto_rate_prepaid) * 100, ame
+
+
+def category_ratios(tables) -> float:
+    """Decision A36: confirm the scalar moved the LEVEL and not the category mix.
+
+    The scalar is applied multiplicatively, so every category's mean price must
+    have moved by the same factor. Any drift here would mean a ratio was edited.
+    """
+    products = tables["dim_product"]
+    realised = products.groupby("category")["list_price"].mean()
+    declared = pd.Series(
+        {k: float(v) for k, v in tables["_declared_category_means"].items()}
+    ).reindex(realised.index)
+
+    # The scalar multiplies every category by the SAME factor, so the implied
+    # per-category scalar must be constant. Its spread is what would move if a
+    # ratio had been edited. Sampling noise contributes too — Electronics has
+    # sigma 0.75, so its sample mean is the noisiest — which is why this is
+    # reported rather than asserted.
+    implied = realised / declared
+    return float((implied / implied.mean() - 1.0).abs().max())
+
+
+
 
 
 def address_tier_correlation(tables) -> float:

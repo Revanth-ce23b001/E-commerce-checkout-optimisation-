@@ -334,7 +334,8 @@
         "median_order_value",
         "auc_ceiling",
         "pre_window_cod_share",
-        "pre_window_rto_rate"
+        "pre_window_rto_rate",
+        "mean_order_value_per_order"
       ],
       "additionalProperties": {
         "$ref": "#/$defs/target"
@@ -366,7 +367,8 @@
         "customer",
         "pre_window",
         "session",
-        "conversion"
+        "conversion",
+        "product_price_scalar_solved"
       ],
       "properties": {
         "geo_tier_weights": {
@@ -453,6 +455,13 @@
           "description": "[A28 PROPOSED] Distribution the spec requires but never quantified (modules 08-12). See decision_register.md A28.",
           "type": "object",
           "minProperties": 1
+        },
+        "product_price_scalar_solved": {
+          "description": "MACHINE-WRITTEN ONLY. Null until the calibrator runs.",
+          "type": [
+            "number",
+            "null"
+          ]
         }
       }
     },
@@ -648,7 +657,8 @@
             "courier_reliability_z_neg",
             "attempt_delay_days",
             "seller_dispatch_late",
-            "noise_sd"
+            "noise_sd_solved",
+            "noise_sd_spec_value"
           ],
           "properties": {
             "courier_reliability_z_neg": {
@@ -660,7 +670,15 @@
             "seller_dispatch_late": {
               "type": "number"
             },
-            "noise_sd": {
+            "noise_sd_solved": {
+              "description": "MACHINE-WRITTEN ONLY. Null until the calibrator runs.",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "noise_sd_spec_value": {
+              "description": "What Phase 2A specified. Reporting only - never used in a calculation.",
               "type": "number",
               "exclusiveMinimum": 0
             }
@@ -1060,7 +1078,9 @@
         "conversion_model",
         "share_tolerance_floor",
         "tolerance_n_scaling",
-        "max_iterations"
+        "max_iterations",
+        "product_price_scalar",
+        "noise_sd"
       ],
       "properties": {
         "share_tolerance_floor": {
@@ -1095,6 +1115,18 @@
           },
           "target": {
             "type": "string"
+          },
+          "target_auc": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "exclusiveMaximum": 1
+          },
+          "tolerance": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "resolve_gamma_each_iteration": {
+            "type": "boolean"
           }
         }
       }

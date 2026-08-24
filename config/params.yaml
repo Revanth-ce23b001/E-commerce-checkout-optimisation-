@@ -5,16 +5,23 @@
 # it lives here.
 #
 # TWO HARD RULES (spec 13.3, CLAUDE.md rule 1):
-#   1. Every `intercept_solved` field is MACHINE-WRITTEN ONLY. The calibrator
-#      writes it and stamps calibration.dgp_sha256. Hand-editing one breaks
-#      reproducibility and src/config/loader.py will refuse to load the file.
+#   1. Every `*_solved` field is MACHINE-WRITTEN ONLY. The calibrator writes it
+#      and stamps calibration.dgp_sha256. Hand-editing one breaks reproducibility
+#      and src/config/loader.py will refuse to load the file.
 #   2. Every slope is IMMUTABLE. If a calibration target cannot be reached with
 #      these slopes, that is a FINDING about the Phase 1 assumption set - it is
 #      escalated and documented, never silently fixed. CAL-09 enforces this
 #      against what the generator actually consumed at runtime.
 #
-# Three intercepts may be solved: cod_model, rto_model, conversion_model.
-# See docs/decision_register.md A2 for the ruling that admits the third.
+# SEVEN calibrated LEVELS, all machine-written:
+#   cod_model.intercept_solved            beta_0
+#   rto_model.intercept_solved            gamma_0
+#   conversion_model.intercept_solved     alpha_0        (A2)
+#   pre_window_cod_model.intercept_solved pi_cod0        (A11)
+#   pre_window_rto_model.intercept_solved pi_rto0        (A11)
+#   distributions.product_price_scalar_solved            (A36)
+#   rto_model.post_dispatch_shock.noise_sd_solved        (A37)
+# Every one is a LEVEL. Zero slopes move, and zero category RATIOS move.
 # =============================================================================
 
 meta:
@@ -102,7 +109,11 @@ calibration_targets:
   checkout_conversion:          {target: 0.680, tol: 0.020, severity: HARD}   # CAL-06
   pct_cod_from_payment_failure: {target: 0.068, tol: 0.020, severity: SOFT}   # CAL-07
   addressable_share_of_rto:     {target: 0.650, tol: 0.050, severity: SOFT}   # CAL-08
-  mean_gmv_per_order:           {target: 1000,  tol: 25,    severity: HARD}   # EC-01, decision A5
+  # Decision A34: a Phase 2A internal inconsistency, now resolved in favour of
+  # Phase 1 6.5, which is unambiguous: GMV 1,000 - 8% discount = net revenue 920.
+  # 24M x 1,000 = 2,400 Cr, which is what the whole 165 Cr model rests on.
+  mean_gmv_per_order:           {target: 1000,  tol: 25,    severity: HARD}   # EC-01
+  mean_order_value_per_order:   {target: 920,   tol: 30,    severity: SOFT}   # EC-01b
   median_order_value:           {target: 690,   tol: 60,    severity: SOFT}   # EC-02
   auc_ceiling:                  {target: 0.760, tol: 0.030, severity: SOFT}   # GT-05
   # Pre-window history (decision A11). SOFT: these seed the point-in-time
@@ -127,7 +138,6 @@ selection_share_gate:
 # order_value = gmv - discount_amount, so mean order_value emerges at ~920.
 # Reported as descriptive figures; not tests.
 reported_not_tested:
-  mean_order_value_expected: 920
   switch_cod_share_of_final_cod_pp: 3.5    # spec 7.3 framing
   switch_cod_share_of_all_orders: 0.042    # spec 10.3 framing - decision A16
 
@@ -143,6 +153,14 @@ distributions:
   category_gmv_sigma:    {FASHION: 0.55, BEAUTY: 0.50, HOME_KITCHEN: 0.60,
                           MOBILE_ACC: 0.52, ELECTRONICS: 0.75, GROCERY_FMCG: 0.45}
   gmv_truncation:        {lo: 149, hi: 60000}
+  # Decision A36 - the SIXTH calibrated level. Machine-written, bisection-solved.
+  # Applied MULTIPLICATIVELY to every category_mean_gmv, so the relative category
+  # mix is preserved exactly and only the level moves. It exists because EC-01 is
+  # measured on ORDERS, and conversion selects against expensive carts at -0.18,
+  # so the order population is a value-selected sample of the session population.
+  # Hand-editing the category means instead would destroy the audit trail and
+  # would have to be redone every time conversion moved.
+  product_price_scalar_solved: null
   seller_rating:         {dist: beta_scaled, a: 6.0, b: 2.2, lo: 2.5, hi: 5.0}
   product_rating:        {dist: beta_scaled, a: 5.4, b: 2.0, lo: 1.5, hi: 5.0}
   review_count:          {dist: lognormal, mu: 3.6, sigma: 1.4, max: 25000}
@@ -440,7 +458,18 @@ rto_model:
     courier_reliability_z_neg: 0.40        # delta_1
     attempt_delay_days: 0.22               # delta_2 - decision A8: RENAMED
     seller_dispatch_late: 0.25             # delta_3
-    noise_sd: 0.85                         # *** the AUC ceiling lever ***
+    # Decision A37 - the SEVENTH calibrated level. Spec 13.2 annotates this
+    # "the AUC ceiling lever" and GT-05 states the ceiling as a TARGET, so it is
+    # calibrated against its declared purpose rather than picked.
+    #
+    # Phase 2A specified 0.85. At that value three independent quantities miss
+    # together - AUC 0.87 vs [0.74, 0.79], prepaid RTO 2.6% vs 4.1%, naive gap
+    # 22.5pp vs 19.9pp - and all three land on target at ~2.6-3.0. Mechanism:
+    # symmetric logit-scale noise on a LOW baseline probability is convex, so it
+    # lifts prepaid RTO disproportionately. Too little noise depresses prepaid
+    # RTO and widens the gap, which is exactly the measured pattern.
+    noise_sd_solved: null                  # machine-written
+    noise_sd_spec_value: 0.85              # what Phase 2A specified; reporting only
 
 # -----------------------------------------------------------------------------
 # CONVERSION MODEL - decision A2. Minimal 7-slope behavioural model.
@@ -744,6 +773,16 @@ calibration_search:
     bracket: [-6.0, 0.0]                   # pi_rto0; decision A11
     loop_modules: ["07"]
     target: pre_window_rto_rate
+  product_price_scalar:
+    bracket: [0.5, 2.0]                    # decision A36
+    target: mean_gmv_per_order             # measured on ORDERS, not sessions
+  noise_sd:
+    bracket: [0.5, 8.0]                    # decision A37
+    target_auc: 0.765                      # midpoint of GT-05's [0.74, 0.79]
+    tolerance: 0.010
+    # gamma_0 re-solves INSIDE each noise iteration, so CAL-05 is held at 16.5%
+    # while the AUC is moved. Otherwise the two would fight each other.
+    resolve_gamma_each_iteration: true
   cod_model:
     bracket: [-2.0, 2.0]                   # spec 7.3; beta_0 expected ~ +0.30
     # Decision A15: 08-09 are invariant to beta_0 and are cached.

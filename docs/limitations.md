@@ -162,3 +162,44 @@ are challenging a business assumption or an implementation choice.
 coefficient. The one with real reach is `geography.cod_cultural_index`, which
 enters the COD logit at +0.30; its deliberately non-monotone tier ordering is
 described in decision A27.
+
+---
+
+## L8 — `post_dispatch_shock.noise_sd` was specified at 0.85 and calibrated to ~3.3
+
+**What.** Phase 2A §13.2 specified `noise_sd = 0.85` and annotated it
+*"★ the AUC ceiling lever ★"*. Empirical calibration against its declared
+purpose — GT-05's AUC ceiling — solved it to **3.3125**.
+
+**Why the specified value was wrong.** At 0.85, three independent quantities miss
+their spec targets *together*: the AUC ceiling (0.87 vs 0.74–0.79), prepaid RTO
+(2.61% vs 4.1%), and the naive COD−prepaid gap (22.5pp vs the ~19.9pp §8.3
+derives). All three land on target at 2.6–3.3. Three independent targets
+converging is not coincidence — it says 0.85 was the inconsistent value.
+
+There is a mechanism. Symmetric logit-scale noise applied to a **low** baseline
+probability is convex, so it lifts the low arm — prepaid RTO — disproportionately.
+Too little noise therefore depresses prepaid RTO *and* widens the gap, which is
+exactly the pattern measured.
+
+**What moved as a consequence.** Both are **derived** quantities under decision
+A6, so these are restatements rather than violations:
+
+| | at `noise_sd` 0.85 | at 3.3125 |
+|---|---:|---:|
+| naive COD−prepaid gap | 22.51pp | **17.64pp** |
+| AME (canonical COD effect) | 14.70pp | **10.05pp** |
+| CAL-11 selection share | 0.347 | **0.430** |
+| AUC ceiling | 0.8745 | **0.7700** |
+
+The spec's §8.3 narrative quotes a 19.9pp naive gap and a ~13.4pp effect. Those
+figures belong to the un-calibrated shock and no longer describe the dataset.
+Any write-up must quote the measured values.
+
+**The one to watch.** CAL-11's selection share sits at **0.430** against a
+[0.25, 0.45] ceiling. It is inside, but the margin is 0.02. If a later change
+raises the noise further, CAL-11 is the test that will fail first — and CAL-11
+failing means the dataset stops supporting the case study, so it should be
+re-checked after any change to the RTO model.
+
+**Decision.** A37.

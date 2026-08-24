@@ -761,7 +761,7 @@ Same status and pattern as A27 / A28. Tagged `[A33 PROPOSED]` in `params.yaml` u
 
 ---
 
-### A34 - EC-01: mean GMV or mean order_value? · **OPEN — CONTRADICTS A5, needs a ruling**
+### A34 - EC-01: mean GMV or mean order_value? · **RULED 2026-08-24 · A5 STANDS**
 
 ⚠️ **The A31 follow-on instruction reverses decision A5, which was approved on
 2026-08-24.** Flagging rather than resolving, because the two readings imply different
@@ -788,10 +788,23 @@ recomputing at GMV ₹1,087; they are currently HARD tests EC-03…EC-06.
 tests GMV at ₹1,000; module 05 divides the category means by E[quantity] only. Both means
 are reported in the checkpoint so the choice can be made against real numbers.
 
-**Recommendation: keep A5.** It preserves the ₹2,400 Cr anchor and all five locked
-economics figures. If EC-01 should instead pin `order_value`, that is a defensible
-position — but it needs the blueprint's GMV headline and the CM waterfall restated with
-it, and that should be an explicit decision rather than a side effect.
+**Ruling: A5 stands. ₹1,000 is GMV.** Phase 1 §6.5 is unambiguous —
+GMV ₹1,000 − 8% platform discount = net revenue ₹920 — and 24M × ₹1,000 = ₹2,400 Cr is
+the figure the whole ₹165 Cr model rests on.
+
+**Root cause, logged as a Phase 2A internal inconsistency.** §3.10 labels `order_value`
+as "the ₹1,000 AOV quantity" and §12.1 pins mean `order_value` at ₹1,000. **Both are wrong
+against Phase 1 §6.5.**
+
+| Test | Severity | Assertion |
+|---|---|---|
+| **EC-01** | HARD | mean **GMV** per order = ₹1,000 ±₹25 |
+| **EC-01b** | SOFT | mean **order_value** per order ≈ ₹920 ±₹30 — reported |
+
+**Specification change required.** §3.10 and §12.1: remove the mislabel.
+
+The earlier instruction to divide by (1 − discount) is withdrawn; the A29
+implementation was already correct.
 
 ---
 
@@ -817,7 +830,7 @@ That is a stronger business argument than the raw 5.75%.
 
 ---
 
-### A36 - EC-01 is measured on ORDERS, and conversion selects on order value · **OPEN — needs a ruling**
+### A36 - EC-01 is measured on ORDERS, and conversion selects on order value · **RULED · IMPLEMENTED**
 
 **Problem, measured at full scale.** `conversion_model.log_order_value = -0.18` means
 expensive carts convert less often. EC-01 is measured on the **order** population, which
@@ -846,17 +859,23 @@ then drifts 4.1% low, which is **outside EC-01's ±₹25 (±2.5%) tolerance**.
   slope, CAL-09 forbids moving it, and it is the checkout-friction mechanism that makes
   `abandon_step` meaningful.
 
-**Recommendation: (b).** It changes no business assumption — the *target* stays ₹1,000 on
-orders — and it makes the generator reproduce the spec's own table rather than a
-value-selected sample of it. It should be an explicit compensation factor in
-`params.yaml`, derived and documented, not a silently retuned category mean.
+**Ruling: (b), as a SIXTH calibrated level — not a hand-edit.**
+`distributions.product_price_scalar_solved`, machine-written and bisection-solved, applied
+multiplicatively to every `category_mean_gmv`. Hand-editing the category means would
+destroy the audit trail and would have to be redone every time conversion moved.
 
-**Interacts with A34.** If EC-01 is instead re-pinned to `order_value` (the A34 reading),
-the required session-level centre changes again. Rule A34 first.
+It joins the **joint** solve rather than running after it: conversion depends on order
+value, order value shifts COD exposure, and COD share feeds back into conversion.
+
+**Implemented.** The scalar is applied in closed form inside the day loop — only three
+terms across the three logits read order value, and `log(v·s) = log(v) + log(s)` — so a
+level that would otherwise have required rebuilding the design matrix costs three vector
+operations per pass. CAL-09's ledger check is joined by a reported *implied per-category
+scalar spread*, which is what would move if a ratio had been edited.
 
 ---
 
-### A37 - The AUC ceiling is 0.87, not 0.74–0.79 · **OPEN — needs a ruling. Load-bearing.**
+### A37 - The AUC ceiling is 0.87, not 0.74–0.79 · **RULED · SOLVED, NOT PICKED**
 
 **The spec's own coefficient set, at the spec's own `noise_sd = 0.85`, does not produce
 the AUC the spec asks for.** Measured at full scale, the AUC of `truth.p_rto_precheckout`
@@ -897,112 +916,161 @@ inconsistent value**, not the rest of the spec.
 every setting, drifting toward the top of the band as noise rises. So this ruling does not
 put the case study at risk in either direction.
 
-**Recommendation: `noise_sd = 2.8`**, between the two sweet spots — the AUC lands just
-inside the band and CAL-03/04 stay comfortably on target. Not changed unilaterally:
-it is a data-generating-process parameter outside the sanctioned intercepts, and
-CLAUDE.md rule 3 says an unreachable target is a finding to escalate, not a knob to turn.
+**Ruling: do not pick a value — CALIBRATE it against its declared purpose.**
+`noise_sd` becomes the **seventh** calibrated level, targeting
+**AUC(`truth.p_rto_precheckout`) = 0.765**, the midpoint of GT-05's band, ±0.010. `gamma_0`
+re-solves **inside** every noise iteration so CAL-05 is held at 16.5% while the AUC moves —
+solved separately the two would fight, since more noise lowers the AUC *and* lifts the
+blended rate.
 
-**If the ruling is to keep 0.85**, then GT-05's band and LK-03's 0.85 guard both need
-restating, and the project loses its leakage tripwire.
+**Mechanism, which explains why 0.85 was wrong.** Symmetric logit-scale noise on a *low*
+baseline probability is convex, so it lifts prepaid RTO disproportionately. Too little
+noise depresses prepaid RTO and widens the COD−prepaid gap — exactly the 2.61% / 22.5pp
+pattern measured. The 0.85 was an intuition, never derived.
+
+**Solved value: 3.3125** (Phase 2A specified 0.85). Constraints at the solution, all four
+reported and all four holding: AUC **0.7700** in band · CAL-11 **0.430**, inside
+[0.25, 0.45] · CAL-05 **0.1659** · CAL-03/04 **0.2340 / 0.0576**, both inside the SOFT
+±2.5pp band · **LK-03 margin +0.0800**, above the 0.05 floor, so the leakage tripwire is
+sharp again.
+
+**Consequences, restated not violated (decision A6 makes both DERIVED).** The naive gap
+lands at **17.64pp** rather than the spec's 19.9pp, and the AME moves from 14.70 to
+**10.05pp**. CAL-11 drifts to the top of its band at 0.430 — inside, but worth watching if
+any later change pushes noise higher. Recorded as limitation **L8**.
+
+---
+
+### A38 - EC-05 / EC-06 / p\* were computed from stated MEANS, not from the formulas · **OPEN — needs a ruling**
+
+**Found while reconciling module 19.** Spec §12.2 states cost parameters **twice** — once
+as per-category or per-attempt formulas, and once as blended means — and the two disagree.
+The §12.4 reconciliation targets were computed from the **means**; the generator implements
+the **formulas**, as CLAUDE.md rule 2 requires.
+
+| Line | Formula, as specified | §12.2's stated mean | Gap |
+|---|---:|---:|---:|
+| `shrink_cost` | `shrink_rate_by_category` weighted by `category_weights` = **9.72%** of COGS | "≈ 8.0% of COGS" | **+1.72pp** → +₹11.87 |
+| `support_ndr_cost` | `18 + 6 × (attempts − 1)` at `max_delivery_attempts = 3` = **₹30** | "**₹18** on RTO" | **+₹12.00** |
+
+The shrink gap is driven by GROCERY_FMCG: a 20% shrink rate at a 15% category weight
+contributes 3.0pp on its own.
+
+The NDR gap is a straight contradiction: a mean of ₹18 implies **one** delivery attempt,
+but an RTO is *by definition* an order that exhausted all three and went back. The stated
+mean cannot be right alongside the stated formula.
+
+**Consequence, measured analytically at a ₹1,000 GMV order:**
+
+| Test | Formulas (implemented) | Target | Verdict |
+|---|---:|---:|---|
+| EC-03 prepaid delivered CM | +₹111.24 | +₹112 ±4 | ✅ |
+| EC-04 COD delivered CM | +₹106.00 | +₹107 ±4 | ✅ |
+| **EC-05 COD RTO cash loss** | **−₹329.57** | −₹309 ±12 | ❌ |
+| **EC-06 COD RTO economic cost** | **−₹435.57** | −₹416 ±15 | ❌ |
+| **p\* break-even** | **0.2434** | 0.257 ±0.008 | ❌ |
+
+Removing exactly the two gaps lands the cash loss at **−₹305.70**, inside EC-05's
+tolerance — which confirms the diagnosis rather than merely fitting it.
+
+**EC-03 and EC-04 pass**, because neither shrink nor NDR touches a delivered order. The
+inconsistency is confined to the RTO leg — which is unfortunately the leg the whole
+opportunity model is built on.
+
+**Options.**
+
+- **(a) Keep the formulas, restate the targets** to −₹330 / −₹436 / p\* 0.243. The
+  per-category rates are the *assumption*; a blended mean is a derived summary of them, and
+  when a summary disagrees with its inputs the inputs usually win. **Recommended.** But
+  −₹416 and 25.7% are CLAUDE.md invariants, so this needs an explicit ruling.
+- **(b) Keep the targets, fix the inputs.** Requires lowering GROCERY_FMCG shrink and
+  either reducing RTO delivery attempts or flattening the NDR formula. That is tuning
+  business assumptions to hit a derived figure — the exact move CAL-09 exists to prevent
+  elsewhere — so it is not recommended.
+- **(c) Split the difference.** Rejected outright.
+
+**Not fixed unilaterally.** Implemented as specified, reported as failing.
+
+**Note on p\*.** Blueprint §6.6's 25.7% is `cod_delivered_cm / (cod_delivered_cm +
+cod_rto_cash_loss)` — the **cash** loss, not the economic cost. That reconciles exactly at
+the stated means (107 / (107 + 309) = 0.2572), which is further confirmation that the
+targets were built from the means.
 
 ---
 
 ## Build status
 
-**Generation modules 02-17 built. The decision-A1 day loop is closed and all five
-intercepts are solved. Modules 18-23 not started.**
-
-| Component | Status |
-|---|---|
-| Config, schema, dev scenario, seed harness, logit assembler, calibration solver | ✅ |
-| `sql/00_schema_analytics.sql` / `01_schema_truth.sql` | ✅ parse clean — ⚠️ never executed, no PostgreSQL |
-| CAL-09 (5 blocks **+ the Stage-2 deltas**) · CAL-10 · CAL-11 · LK-06 | ✅ |
-| DQ-07a / 07b / 07c | 📋 specified; needs modules 18-20 |
-| **02-05** dates, geography, sellers, products | ✅ |
-| **06-07** customers, latents, pre-window history | ✅ |
-| **08** sessions · **09** point-in-time state | ✅ |
-| **10-12** COD intent, hurdles, payment attempts, conversion | ✅ |
-| **13-14** orders, cancellations | ✅ |
-| **15-17** pre-checkout score, delivery + shock, RTO draw | ✅ |
-| **A1 day loop closed**, 3 in-window intercepts solved jointly | ✅ drift 0.00e+00 |
-| Modules 18-23 (reasons, economics, roll-up, PostgreSQL, validation) | ⬜ not started |
+**Generation modules 02-17 built and recalibrated on seven levels. Module 19
+(economics) written and reconciled. Modules 18, 20-23 not started.**
 
 **146 unit tests, all passing.**
 
-### Checkpoint — modules 02-17, full scale, seed 20260115
+### Checkpoint — modules 02-17, full scale, seed 20260115, post-recalibration
 
-| | Value | |
-|---|---:|---|
-| sessions | 155,000 | |
-| **orders** | **104,803** | VOL-01 ✅ |
-| shipped | 100,621 | |
-| cancelled pre-ship | 4,182 | |
-| censored | 9,962 | 9.51% of orders |
-| **derived annualisation factor** | **229.00** | EC-08 [200, 280] ✅ |
-
-**Joint solve.** Three in-window intercepts, alternating to a fixed point; **drift
-0.00e+00 on all three**. The two pre-window intercepts are solved once in module 07 —
-provably independent, since no in-window quantity can reach back before the window opened.
-
-| Intercept | Solved | Realised | |
+| Level | Solved | Realised | |
 |---|---:|---:|---|
-| `alpha_0` conversion | +0.2500 | 0.6761 | ✅ |
-| `beta_0` COD | −0.2500 | 0.6192 | ✅ |
-| `gamma_0` RTO | −4.1250 | 0.1631 blended | ✅ |
-| `pi_cod0` pre-window | +0.5156 | 0.6166 | ✅ |
-| `pi_rto0` pre-window | −3.3750 | 0.1671 | ✅ |
+| `product_price_scalar` (A36) | **1.039062** | mean GMV 1001.08 | ✅ |
+| `alpha_0` conversion | **+0.281250** | 0.6815 | ✅ |
+| `beta_0` COD | **−0.250000** | 0.6220 | ✅ |
+| `noise_sd` (A37) | **3.312500** | AUC 0.7702 | ✅ |
+| `gamma_0` RTO | **−5.250000** | 0.1656 blended | ✅ |
+| `pi_cod0` pre-window | **+0.515625** | 0.6166 | ✅ |
+| `pi_rto0` pre-window | **−3.375000** | 0.1671 | ✅ |
 
-| Test | Actual | Target | |
+**Drift on the final pass: 0.00e+00 on all seven.** The two pre-window levels are
+solved once in module 07 and reported at drift 0, which makes their independence
+checkable rather than merely asserted.
+
+| Test | Actual | Target | Severity |
 |---|---:|---|---|
-| CAL-01 COD share | 0.6192 | 0.620 ±0.010 HARD | ✅ |
-| CAL-05 RTO blended | 0.1631 | 0.165 ±0.010 HARD | ✅ |
-| CAL-06 conversion | 0.6761 | 0.680 ±0.020 HARD | ✅ |
-| CAL-03 RTO COD | 0.2512 | 0.240 ±0.025 SOFT | ✅ **EMERGENT** |
-| CAL-04 RTO prepaid | 0.0261 | 0.041 ±0.025 SOFT | ✅ **EMERGENT** |
-| VOL-02b consistency | 0.00e+00 | < 0.001 HARD | ✅ |
-| DQ-14 late-window censoring | 0.3524 | ≥ 0.03 | ✅ |
+| VOL-01 orders | **105,626** | ≥ 100,000 | HARD ✅ |
+| VOL-02b consistency | 0.00e+00 | < 0.001 | HARD ✅ |
+| EC-08 annualisation factor | **227.22** | [200, 280] DERIVED | HARD ✅ |
+| CAL-01 COD share | 0.6220 | 0.620 ±0.010 | HARD ✅ |
+| CAL-05 RTO blended | 0.1656 | 0.165 ±0.010 | HARD ✅ |
+| CAL-06 conversion | 0.6815 | 0.680 ±0.020 | HARD ✅ |
+| CAL-03 RTO COD | 0.2339 | 0.240 ±0.025 | SOFT · **EMERGENT** ✅ |
+| CAL-04 RTO prepaid | 0.0575 | 0.041 ±0.025 | SOFT · **EMERGENT** ✅ |
+| EC-01 mean GMV | **1001.08** | 1000 ±25 | HARD ✅ |
+| EC-01b mean order_value | **919.60** | 920 ±30 | SOFT ✅ |
+| DQ-14 late-window censoring | 0.3555 | ≥ 0.03 | ✅ |
 | CAL-09 · CAL-10 · LK-06 | — | — | ✅ |
 
-### CAL-11 — the gate that decides whether the dataset supports the case study
+### CAL-11 — the gate
 
 | | |
 |---|---:|
-| naive COD−prepaid gap | **22.51pp** |
-| AME (canonical, decision A6) | **14.70pp** |
-| **selection share** | **0.347** |
-| CAL-11 band | [0.25, 0.45] ✅ |
-| GT-02 (naive > AME **and** CAL-11 passes) | ✅ |
+| naive COD−prepaid gap | **17.65pp** |
+| AME (canonical, A6) | **10.05pp** |
+| **selection share** | **0.430** — inside [0.25, 0.45] ✅ |
+| GT-02 (naive > AME **and** CAL-11) | ✅ |
 
-The dataset carries the planted confounding: a naive crosstab overstates the causal
-effect of COD by roughly a third, which is the project's central claim.
+⚠️ The margin to the ceiling is **0.02**. CAL-11 is the test that will fail first if
+anything later raises the shock noise. See limitation L8.
 
-### Two failures, both escalated rather than patched
-
-**A37 — the AUC ceiling is 0.8745, not 0.74–0.79.** Above GT-05's band and above LK-03's
-0.85 leakage guard, which means LK-03 can no longer tell "something leaked" from "the DGP
-is very predictable". The spec-designated lever (`post_dispatch_shock.noise_sd`) was swept
-rather than moved: at 2.6–3.0 the AUC, CAL-03, CAL-04 *and* the naive gap all land on
-target simultaneously. **Needs a ruling.**
-
-**A36 — mean GMV on orders is 962.70, not 1,000.** Sessions land at 1,004.15, so the
-E[quantity] correction works; the order population then drifts −4.13% because
-`conversion_model.log_order_value = −0.18` selects against expensive carts and EC-01 is
-measured on orders. **Needs a ruling.**
-
-### Measured properties, previously only asserted
+### AUC ceiling and the leakage tripwire
 
 | | |
-|---|---|
-| corr(`address_completeness_score`, geo tier rank) | **+0.0002** — decision A28(a) independence, now measured |
-| intra-day repeat sessions | **1.52%** — placements are exact, not day-batched |
-| daily volume vs `demand_index` | correlation > 0.9 — uniform across *customers*, never across days |
+|---|---:|
+| AUC of `truth.p_rto_precheckout` | **0.7702** — inside GT-05's [0.74, 0.79] ✅ |
+| AUC of `truth.p_rto_final` | 0.9610 (includes the shock) |
+| **LK-03 tripwire margin** | **+0.0798** — above the 0.05 floor ✅ |
+
+### Module 19 — economics, reconciled analytically at a ₹1,000 GMV order
+
+| Test | Computed | Target | |
+|---|---:|---:|---|
+| EC-03 prepaid delivered CM | +₹111.24 | +₹112 ±4 | ✅ |
+| EC-04 COD delivered CM | +₹106.00 | +₹107 ±4 | ✅ |
+| EC-05 COD RTO cash loss | **−₹329.57** | −₹309 ±12 | ❌ **A38** |
+| EC-06 COD RTO economic cost | **−₹435.57** | −₹416 ±15 | ❌ **A38** |
+| p\* break-even | **0.2434** | 0.257 ±0.008 | ❌ **A38** |
 
 ### Open items
 
 | # | Item | Blocks |
 |---|---|---|
-| **A37** | AUC ceiling 0.87 vs 0.74–0.79; `noise_sd` lever swept, recommend 2.8 | Module 19 — economics would inherit the wrong risk structure |
-| **A36** | EC-01 measured on a value-selected order population | Module 19 |
-| **A34** | EC-01: mean GMV vs mean order_value — **contradicts approved A5** | A36 depends on this |
-| **A33** | `[A33 PROPOSED]` delivery distributions for modules 13-17 | Nothing today; data already depends on them |
-| — | `docs/data_generating_process.md` still does not exist (A3, A25, A26 owe it) | Docs |
+| **A38** | EC-05/06/p\* were computed from §12.2's stated MEANS; the formulas give different numbers | Module 20+ and the validation run |
+| **A33** | `[A33 PROPOSED]` delivery distributions | Nothing today |
+| — | Modules 18 (RTO reasons), 20-23 not started | — |
+| — | `docs/data_generating_process.md` still absent | Docs |

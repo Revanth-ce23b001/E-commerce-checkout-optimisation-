@@ -42,6 +42,11 @@ import yaml
 
 # Structural key names — the shape of the config file, not business assumptions.
 INTERCEPT_KEY = "intercept_solved"
+# Any key ending in `_solved` is MACHINE-WRITTEN and stripped from the DGP hash.
+# Decisions A36 and A37 added two calibrated LEVELS that are not intercepts —
+# `product_price_scalar_solved` and `noise_sd_solved` — and both need exactly the
+# same protection: a human editing one silently invalidates the calibration.
+SOLVED_SUFFIX = "_solved"
 CALIBRATION_BLOCK = "calibration"
 DGP_HASH_KEY = "dgp_sha256"
 
@@ -108,7 +113,7 @@ class Params:
         return value
 
     def solved_intercepts(self) -> dict[str, float | None]:
-        """Every ``intercept_solved`` field found anywhere in the file, by dotted path.
+        """Every machine-written ``*_solved`` field in the file, by dotted path.
 
         Discovered structurally rather than from a hard-coded list, so adding a new
         model block is picked up automatically.
@@ -256,10 +261,18 @@ def _canonical_sha256(data: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _is_solved_key(key: Any) -> bool:
+    """True for a machine-written ``*_solved`` field."""
+    return isinstance(key, str) and key.endswith(SOLVED_SUFFIX)
+
+
 def _strip_intercepts(data: Any) -> Any:
-    """Return a deep copy with every ``intercept_solved`` value removed."""
+    """Return a deep copy with every machine-written ``*_solved`` value removed."""
     if isinstance(data, dict):
-        return {k: _strip_intercepts(v) for k, v in data.items() if k != INTERCEPT_KEY}
+        # Some weight maps are keyed by int (cart_size, quantity, weekday), so
+        # the suffix test has to tolerate a non-string key rather than assume one.
+        return {k: _strip_intercepts(v) for k, v in data.items()
+                if not _is_solved_key(k)}
     if isinstance(data, list):
         return [_strip_intercepts(v) for v in data]
     return data
@@ -270,7 +283,7 @@ def _find_intercepts(data: Any, prefix: str = "") -> list[tuple[str, Any]]:
     if isinstance(data, dict):
         for key, value in data.items():
             path = f"{prefix}.{key}" if prefix else key
-            if key == INTERCEPT_KEY:
+            if _is_solved_key(key):
                 found.append((path, value))
             else:
                 found.extend(_find_intercepts(value, path))

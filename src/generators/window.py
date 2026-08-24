@@ -108,6 +108,9 @@ class WindowMetrics:
     n_censored: int = 0
     n_cancelled: int = 0
     switch_cod_orders: int = 0
+    mean_gmv: float = 0.0
+    mean_order_value: float = 0.0
+    auc_precheckout: float = 0.0
     extra: dict = field(default_factory=dict)
 
 

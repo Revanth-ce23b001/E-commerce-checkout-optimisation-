@@ -61,6 +61,22 @@ def prepare(params, sessions, customers, latents, products, sellers, geography,
         "gmv": sessions["prospective_gmv"].to_numpy(float),
     }
 
+    # Decision A36. The price scalar multiplies every list price, so
+    # log(order_value * s) = log(order_value) + log(s). Only three terms in the
+    # three logits read order value, so the whole effect of the scalar is a cheap
+    # closed-form adjustment to the static predictors -- no rebuild, which is what
+    # makes it affordable to put inside the joint solve.
+    centre = params.require("distributions.centering")
+    setup["log_ov_base"] = np.log(
+        np.maximum(setup["order_value"], 1.0) / float(centre["order_value_scale"])
+    )
+    setup["c_cod_lov"] = float(params.require("cod_model.coefficients.log_order_value"))
+    setup["c_cod_lov2"] = float(params.require("cod_model.coefficients.log_order_value_sq"))
+    setup["c_conv_lov"] = float(
+        params.require("conversion_model.coefficients.log_order_value")
+    )
+    setup["c_rto_lov"] = float(params.require("rto_model.coefficients.log_order_value"))
+
     rc, rp, rv, rr = rngs["cod"], rngs["payment"], rngs["conversion"], rngs["rto"]
     rd = rngs["delivery"]
     setup["draws"] = {
@@ -72,9 +88,10 @@ def prepare(params, sessions, customers, latents, products, sellers, geography,
         "u_cancel": rr.random(n),
         "u_actor": rr.random(n),
         "u_rto": rr.random(n),
-        "nu": rr.normal(
-            0.0, float(params.require("rto_model.post_dispatch_shock.noise_sd")), n
-        ),
+        # Decision A37: drawn STANDARD and scaled by the solved noise level, so
+        # changing noise_sd never resamples. Redrawing per iteration would break
+        # the common-random-numbers property the bisection depends on.
+        "nu_std": rr.normal(0.0, 1.0, n),
         "u_dispatch": rd.normal(0.0, 1.0, n),
         "u_transit": rd.normal(0.0, 1.0, n),
         "u_return": rd.normal(0.0, 1.0, n),
@@ -98,13 +115,29 @@ def _shim_state(n: int) -> pd.DataFrame:
 
 
 def simulate_window(setup: dict, alpha0: float, beta0: float, gamma0: float,
+                    scalar: float = 1.0, noise_sd: float = 0.85,
                     collect: bool = False) -> WindowMetrics:
-    """One full pass of the day loop. Deterministic given the pre-allocated draws."""
+    """One full pass of the day loop. Deterministic given the pre-allocated draws.
+
+    ``scalar`` (A36) and ``noise_sd`` (A37) are the two calibrated levels that are
+    not intercepts. Both are applied without touching any drawn value: the scalar
+    shifts three log-order-value terms in closed form, and the noise level scales
+    a fixed standard normal.
+    """
     p = setup["params"]
     d = setup["draws"]
     idx = setup["index"]
     ctx = setup["ctx"]
     n = setup["n"]
+
+    ln_s = float(np.log(scalar))
+    cod_static = setup["cod_static"] + setup["c_cod_lov"] * ln_s + setup["c_cod_lov2"] * (
+        2.0 * setup["log_ov_base"] * ln_s + ln_s**2
+    )
+    conv_static = setup["conv_static"] + setup["c_conv_lov"] * ln_s
+    rto_static = setup["rto_static"] + setup["c_rto_lov"] * ln_s
+    nu = d["nu_std"] * noise_sd
+    order_value = setup["order_value"] * scalar
 
     state = WindowState.from_arrays(setup["n_customers"], setup["pre_window"])
     resolutions: list[list] = [[] for _ in range(setup["window_days"] + 2)]
@@ -148,7 +181,7 @@ def simulate_window(setup: dict, alpha0: float, beta0: float, gamma0: float,
 
             # -- module 10: COD intent -------------------------------------
             cod_logit = (
-                setup["cod_static"][positions] + beta0 + d["eps_cod"][positions]
+                cod_static[positions] + beta0 + d["eps_cod"][positions]
                 + pred.cod_dynamic(
                     setup["cod_dyn"], pit["cod_share"], pit["prepaid_success"],
                     pit["is_new"], pit["delivered"], pit["payment_failure_rate"],
@@ -158,7 +191,7 @@ def simulate_window(setup: dict, alpha0: float, beta0: float, gamma0: float,
 
             # -- modules 11a / 11b: the two hurdles -------------------------
             conv_logit = (
-                setup["conv_static"][positions] + alpha0 + d["eps_conv"][positions]
+                conv_static[positions] + alpha0 + d["eps_conv"][positions]
                 + setup["conv_dyn"]["pit_is_new_customer"] * pit["is_new"].astype(float)
             )
             p_convert = logistic(conv_logit)
@@ -232,7 +265,7 @@ def simulate_window(setup: dict, alpha0: float, beta0: float, gamma0: float,
 
             # -- module 15: pre-checkout score, frozen before Stage-4 info --
             pre = (
-                setup["rto_static"][ord_pos] + gamma0
+                rto_static[ord_pos] + gamma0
                 + rto_mod.stage1_dynamic(
                     setup["rto_dyn"],
                     pit["rto_rate_shrunk"][ord_local], pit["is_new"][ord_local],
@@ -254,7 +287,7 @@ def simulate_window(setup: dict, alpha0: float, beta0: float, gamma0: float,
             )
             shock = rto_mod.post_dispatch_shock(
                 setup["shock_coef"], courier_z, timeline["attempt_delay_days"],
-                timeline["seller_dispatch_late"], d["nu"][ord_pos],
+                timeline["seller_dispatch_late"], nu[ord_pos],
             )
             final_logit = pre + shock
             p_final[ord_pos] = logistic(final_logit)
@@ -271,7 +304,7 @@ def simulate_window(setup: dict, alpha0: float, beta0: float, gamma0: float,
             # -- counters: placements are exact, resolutions are scheduled ---
             np.add.at(state.placed, ord_cust, 1)
             np.add.at(state.cod_orders, ord_cust[cod_here[ord_local]], 1)
-            np.add.at(state.value_sum, ord_cust, setup["order_value"][ord_pos])
+            np.add.at(state.value_sum, ord_cust, order_value[ord_pos])
             np.add.at(state.value_count, ord_cust, 1)
             state.last_order_day[ord_cust] = float(day)
             np.add.at(state.prepaid_success, cust[outcome.succeeded], 1)
@@ -290,8 +323,30 @@ def simulate_window(setup: dict, alpha0: float, beta0: float, gamma0: float,
                              pit["rto_rate_shrunk"][ord_local], pit["is_new"][ord_local],
                              cod_here[ord_local], setup["tier_rules"]))
 
-    return _metrics(setup, converted, is_cod_order, switched, shipped, cancelled,
-                    censored, rto_flag, p_pre, p_final, collected, collect)
+    m = _metrics(setup, converted, is_cod_order, switched, shipped, cancelled,
+                 censored, rto_flag, p_pre, p_final, collected, collect)
+    # EC-01 is measured on ORDERS, which are a value-selected sample of sessions
+    # (decision A36) -- so the mean has to be taken over the converted set, not
+    # over all sessions.
+    m.mean_gmv = float((setup["gmv"] * scalar)[converted].mean()) if converted.any() else 0.0
+    m.mean_order_value = float(order_value[converted].mean()) if converted.any() else 0.0
+    m.auc_precheckout = _auc(rto_flag, p_pre, shipped & ~censored)
+    return m
+
+
+def _auc(rto_flag: np.ndarray, p_pre: np.ndarray, mask: np.ndarray) -> float:
+    """AUC of the pre-checkout score -- the ceiling any risk model is bounded by.
+
+    Decision A37 calibrates ``noise_sd`` against this, so it is computed on every
+    pass rather than only in the report.
+    """
+    if not mask.any():
+        return 0.0
+    y = rto_flag[mask]
+    if y.all() or not y.any():
+        return 0.0
+    from sklearn.metrics import roc_auc_score
+    return float(roc_auc_score(y, p_pre[mask]))
 
 
 
@@ -352,77 +407,117 @@ def _metrics(setup, converted, is_cod_order, switched, shipped, cancelled, censo
     return m
 
 
-def solve_intercepts(setup: dict, params) -> dict:
-    """Alternately solve alpha_0, beta_0 and gamma_0 until all three settle.
+def solve_all(setup: dict, params, pre_window) -> dict:
+    """The seven-way alternating solve. Every level; zero slopes.
 
-    They are coupled through the point-in-time features: conversion changes which
-    sessions become orders, COD share changes who is exposed to payment risk, and
-    RTO outcomes feed back into ``pit_rto_rate_shrunk`` for later sessions. Solving
-    any one in isolation would move the other two.
+    Order within a pass is chosen so each solve sees the most settled version of
+    everything it depends on:
 
-    Decision A7: ``gamma_0`` is solved against the **blended** RTO rate alone.
-    CAL-03 and CAL-04 are emergent and are reported, never solved for.
+    1. **price_scalar** (A36) — EC-01 is measured on ORDERS, and conversion selects
+       against expensive carts, so the level has to be solved against the *order*
+       population rather than the session population.
+    2. **alpha_0** — conversion.
+    3. **beta_0** — COD share, which depends on who converted.
+    4. **noise_sd + gamma_0** (A37) — solved together. gamma_0 re-solves inside
+       every noise iteration, so CAL-05 is held at 16.5% while the AUC is moved.
+       Solved separately they would fight: more noise lowers the AUC *and* lifts
+       the blended rate, so gamma_0 would chase noise_sd around forever.
+
+    The two pre-window levels are solved once, outside: pre-window history is
+    generated from latents alone, and no in-window quantity can reach back before
+    the window opened. Their drift is reported as 0 to make that checkable rather
+    than merely claimed.
     """
     search = params.require("calibration_search")
     targets = params.require("calibration_targets")
-    n_sessions = setup["n"]
+    n = setup["n"]
 
-    def tol_for(name: str) -> float:
+    def tol(name: str) -> float:
         return min(
-            scaled_tolerance(
-                n_sessions,
-                float(search["share_tolerance_floor"]),
-                float(search["tolerance_n_scaling"]),
-            ),
+            scaled_tolerance(n, float(search["share_tolerance_floor"]),
+                             float(search["tolerance_n_scaling"])),
             float(targets[name]["tol"]),
         )
 
-    alpha0 = beta0 = 0.0
-    gamma0 = -3.0
+    alpha0, beta0, gamma0 = 0.25, -0.25, -4.125
+    scalar = 1.0
+    noise = float(params.require("rto_model.post_dispatch_shock.noise_sd_spec_value"))
     results: dict = {}
-    history: list[tuple[float, float, float]] = []
+
+    noise_cfg = search["noise_sd"]
+    target_auc = float(noise_cfg["target_auc"])
+
+    def solve_gamma(sc: float, nz: float):
+        return solve_intercept(
+            lambda g: simulate_window(setup, alpha0, beta0, g, sc, nz).rto_rate_blended,
+            block="rto_model", target=float(targets["rto_rate_blended"]["target"]),
+            tolerance=tol("rto_rate_blended"),
+            bracket=tuple(search["rto_model"]["bracket"]),
+            max_iterations=int(search["max_iterations"]),
+        )
 
     for _ in range(int(params.require("distributions.conversion.joint_solve_passes"))):
-        previous = (alpha0, beta0, gamma0)
+        previous = (alpha0, beta0, gamma0, scalar, noise)
+
+        results["product_price_scalar"] = solve_intercept(
+            lambda sc: simulate_window(setup, alpha0, beta0, gamma0, sc, noise).mean_gmv,
+            block="product_price_scalar",
+            target=float(targets["mean_gmv_per_order"]["target"]),
+            # A third of EC-01's tolerance. Solving to the full +/-25 would let the
+            # scalar settle within a rupee of the boundary, where a later re-solve
+            # of any other level could push EC-01 over it.
+            tolerance=float(targets["mean_gmv_per_order"]["tol"]) / 3.0,
+            bracket=tuple(search["product_price_scalar"]["bracket"]),
+            max_iterations=int(search["max_iterations"]),
+        )
+        scalar = results["product_price_scalar"].intercept
 
         results["conversion_model"] = solve_intercept(
-            lambda a: simulate_window(setup, a, beta0, gamma0).conversion_rate,
+            lambda a: simulate_window(setup, a, beta0, gamma0, scalar, noise).conversion_rate,
             block="conversion_model",
             target=float(targets["checkout_conversion"]["target"]),
-            tolerance=tol_for("checkout_conversion"),
+            tolerance=tol("checkout_conversion"),
             bracket=tuple(search["conversion_model"]["bracket"]),
             max_iterations=int(search["max_iterations"]),
         )
         alpha0 = results["conversion_model"].intercept
 
         results["cod_model"] = solve_intercept(
-            lambda b: simulate_window(setup, alpha0, b, gamma0).cod_share,
-            block="cod_model",
-            target=float(targets["cod_share"]["target"]),
-            tolerance=tol_for("cod_share"),
+            lambda b: simulate_window(setup, alpha0, b, gamma0, scalar, noise).cod_share,
+            block="cod_model", target=float(targets["cod_share"]["target"]),
+            tolerance=tol("cod_share"),
             bracket=tuple(search["cod_model"]["bracket"]),
             max_iterations=int(search["max_iterations"]),
         )
         beta0 = results["cod_model"].intercept
 
-        results["rto_model"] = solve_intercept(
-            lambda g: simulate_window(setup, alpha0, beta0, g).rto_rate_blended,
-            block="rto_model",
-            target=float(targets["rto_rate_blended"]["target"]),
-            tolerance=tol_for("rto_rate_blended"),
-            bracket=tuple(search["rto_model"]["bracket"]),
+        # AUC FALLS as noise rises, and solve_intercept requires a non-decreasing
+        # objective -- so it is negated rather than special-cased.
+        def auc_objective(nz: float) -> float:
+            g = solve_gamma(scalar, nz).intercept
+            return -simulate_window(setup, alpha0, beta0, g, scalar, nz).auc_precheckout
+
+        results["noise_sd"] = solve_intercept(
+            auc_objective, block="noise_sd", target=-target_auc,
+            tolerance=float(noise_cfg["tolerance"]),
+            bracket=tuple(noise_cfg["bracket"]),
             max_iterations=int(search["max_iterations"]),
         )
+        noise = results["noise_sd"].intercept
+
+        results["rto_model"] = solve_gamma(scalar, noise)
         gamma0 = results["rto_model"].intercept
 
-        history.append((alpha0, beta0, gamma0))
-
     drift = {
-        "alpha_0": abs(alpha0 - previous[0]),
-        "beta_0": abs(beta0 - previous[1]),
-        "gamma_0": abs(gamma0 - previous[2]),
+        "alpha_0": abs(alpha0 - previous[0]), "beta_0": abs(beta0 - previous[1]),
+        "gamma_0": abs(gamma0 - previous[2]), "price_scalar": abs(scalar - previous[3]),
+        "noise_sd": abs(noise - previous[4]),
+        "pi_cod0": 0.0, "pi_rto0": 0.0,   # provably independent; see the docstring
     }
     return {
         "alpha_0": alpha0, "beta_0": beta0, "gamma_0": gamma0,
-        "calibrations": results, "drift": drift, "history": history,
+        "price_scalar": scalar, "noise_sd": noise,
+        "pi_cod0": pre_window.cod_calibration.intercept,
+        "pi_rto0": pre_window.rto_calibration.intercept,
+        "calibrations": results, "drift": drift,
     }
