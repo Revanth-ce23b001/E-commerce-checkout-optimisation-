@@ -44,11 +44,22 @@ scale:
 # CALIBRATION TARGETS - what the emergent data must reproduce (spec 17 CAL/EC).
 # These are TARGETS THE DATA MAY MISS. A miss is a finding, not a licence to tune.
 # -----------------------------------------------------------------------------
+# Decision A7: three HARD RTO targets against ONE degree of freedom (gamma_0) is
+# a spec inconsistency. gamma_0 is calibrated against the BLENDED rate alone --
+# the one target that is a true function of it. The COD and prepaid rates, and
+# the gap between them, are EMERGENT from the fixed is_cod = +1.60 plus whatever
+# selection the COD model produces. They are reported as emergent, not as inputs.
+# No second knob is added: widening the gap would require moving latent slopes,
+# which CAL-09 forbids.
 calibration_targets:
   cod_share:                    {target: 0.620, tol: 0.010, severity: HARD}   # CAL-01
   prepaid_share:                {target: 0.380, tol: 0.010, severity: HARD}   # CAL-02
-  rto_rate_cod:                 {target: 0.240, tol: 0.015, severity: HARD}   # CAL-03
-  rto_rate_prepaid:             {target: 0.041, tol: 0.008, severity: HARD}   # CAL-04
+  # CAL-03/04: DOWNGRADED to SOFT, widened to +/-2.5pp. EMERGENT, NOT CALIBRATED.
+  rto_rate_cod:                 {target: 0.240, tol: 0.025, severity: SOFT,
+                                 emergent: true}                              # CAL-03
+  rto_rate_prepaid:             {target: 0.041, tol: 0.025, severity: SOFT,
+                                 emergent: true}                              # CAL-04
+  # CAL-05: the ONLY RTO target gamma_0 is calibrated against. Stays HARD.
   rto_rate_blended:             {target: 0.165, tol: 0.010, severity: HARD}   # CAL-05
   checkout_conversion:          {target: 0.680, tol: 0.020, severity: HARD}   # CAL-06
   pct_cod_from_payment_failure: {target: 0.068, tol: 0.020, severity: SOFT}   # CAL-07
@@ -56,6 +67,23 @@ calibration_targets:
   mean_gmv_per_order:           {target: 1000,  tol: 25,    severity: HARD}   # EC-01, decision A5
   median_order_value:           {target: 690,   tol: 60,    severity: SOFT}   # EC-02
   auc_ceiling:                  {target: 0.760, tol: 0.030, severity: SOFT}   # GT-05
+  # Pre-window history (decision A11). SOFT: these seed the point-in-time
+  # features, they are not themselves a Phase 1 deliverable.
+  pre_window_cod_share:         {target: 0.620, tol: 0.020, severity: SOFT}
+  pre_window_rto_rate:          {target: 0.165, tol: 0.020, severity: SOFT}
+
+# CAL-11 (HARD) -- decision A7. THE REAL GATE ON THIS DATASET.
+#
+#   selection_share = (naive_gap - AME) / naive_gap
+#
+# The entire analytical payoff of this project is "naive analysis overstates the
+# COD effect by roughly a third". If selection share lands at 8% or at 60%, the
+# dataset no longer supports the case study -- regardless of whether the RTO rate
+# levels hit their targets. This is HARD precisely where CAL-03/04 no longer are.
+selection_share_gate:
+  lo: 0.25
+  hi: 0.45
+  severity: HARD
 
 # Decision A5: 1,000 rupees is mean GMV PER ORDER, not mean order_value.
 # order_value = gmv - discount_amount, so mean order_value emerges at ~920.
@@ -84,6 +112,85 @@ distributions:
   cart_size_weights:     {1: 0.52, 2: 0.24, 3: 0.13, 4: 0.07, 5: 0.04}
   device_type_weights:   {ANDROID: 0.62, IOS: 0.16, WEB: 0.22}
   weight_band_weights:   {LIGHT: 0.55, MEDIUM: 0.33, HEAVY: 0.12}
+  # ===========================================================================
+  # [A27 - PROPOSED, NOT YET APPROVED]
+  #
+  # Every value from here to the end of this block is a distribution the spec
+  # requires but never quantified. Modules 02-07 cannot run without them. They
+  # are written here, visibly tagged, rather than buried as literals in src/ --
+  # but they are NOT approved, and each is listed in decision_register.md A27
+  # with its rationale.
+  #
+  # None of them feeds a calibration target or a planted causal coefficient.
+  # They shape realism (names, tiers, ratings, volume seasonality), not the
+  # relationships the project exists to measure. That is why proceeding on them
+  # is contained rather than reckless -- but they still need sign-off.
+  # ===========================================================================
+
+  # Module 02 - dim_date.demand_index. Spec: "weekly seasonality + month-end".
+  demand:
+    weekday_multiplier: {1: 0.96, 2: 0.94, 3: 0.96, 4: 1.00, 5: 1.09, 6: 1.12, 7: 1.03}
+    month_end_multiplier: 1.08          # is_month_end_window
+    salary_week_multiplier: 1.06        # is_salary_week
+    noise_sd: 0.04
+
+  # Module 03 - dim_geography. Tier drives access, not trust (see the
+  # cod_cultural_index note in the DDL).
+  geography:
+    serviceability:      {METRO: 0.88, TIER1: 0.78, TIER2: 0.64, TIER3: 0.48, sd: 0.09}
+    courier_reliability: {METRO: 0.86, TIER1: 0.80, TIER2: 0.71, TIER3: 0.61, sd: 0.08}
+    base_delivery_days:  {METRO: 2.6, TIER1: 3.4, TIER2: 4.6, TIER3: 6.1, sd: 0.5}
+    # Deliberately NOT tier-ordered the same way as serviceability: COD norms are
+    # a separate channel from access. Tier-1 is the most COD-normative band.
+    cod_cultural_index:  {METRO: 0.44, TIER1: 0.68, TIER2: 0.72, TIER3: 0.66, sd: 0.11}
+
+  # Module 04 - dim_seller.
+  seller:
+    tenure_days:            {dist: lognormal, mu: 6.1, sigma: 0.75, max: 3650}
+    rating_count:           {dist: lognormal, mu: 5.2, sigma: 1.3, max: 60000}
+    sla_breach_rate:        {dist: beta, a: 2.0, b: 22.0}      # mean ~0.083
+    cancellation_rate:      {dist: beta, a: 1.6, b: 74.0}      # mean ~0.021
+    fulfilment_model_weights: {PLATFORM: 0.62, SELLER_SHIP: 0.38}
+    # seller_tier is DERIVED from rating and SLA breach, not drawn.
+    tier_thresholds:
+      GOLD:   {min_rating: 4.5, max_sla_breach: 0.06}
+      SILVER: {min_rating: 4.0, max_sla_breach: 0.12}
+      # everything else is BRONZE
+
+  # Module 05 - dim_product.
+  product:
+    base_discount_pct: {dist: beta, a: 2.6, b: 29.0}           # mean ~0.082
+    is_returnable_by_category: {FASHION: 0.97, BEAUTY: 0.80, HOME_KITCHEN: 0.93,
+                                MOBILE_ACC: 0.90, ELECTRONICS: 0.95, GROCERY_FMCG: 0.35}
+    weight_band_by_category:
+      FASHION:      {LIGHT: 0.78, MEDIUM: 0.20, HEAVY: 0.02}
+      BEAUTY:       {LIGHT: 0.92, MEDIUM: 0.07, HEAVY: 0.01}
+      HOME_KITCHEN: {LIGHT: 0.24, MEDIUM: 0.46, HEAVY: 0.30}
+      MOBILE_ACC:   {LIGHT: 0.95, MEDIUM: 0.05, HEAVY: 0.00}
+      ELECTRONICS:  {LIGHT: 0.34, MEDIUM: 0.44, HEAVY: 0.22}
+      GROCERY_FMCG: {LIGHT: 0.40, MEDIUM: 0.44, HEAVY: 0.16}
+
+  # Module 06 - dim_customer.
+  customer:
+    tenure_days_at_window_start: {dist: lognormal, mu: 5.4, sigma: 1.0, max: 2200}
+    age_bucket_weights: {"18-24": 0.19, "25-34": 0.38, "35-44": 0.24,
+                         "45-54": 0.13, "55+": 0.06}
+    acquisition_channel_weights: {ORGANIC: 0.34, PAID_SOCIAL: 0.31,
+                                  PAID_SEARCH: 0.22, REFERRAL: 0.13}
+    # Mechanical ceiling on any prepaid-shift intervention (H7 limitation).
+    # Rises with trust and liquidity, which is why it is not a flat rate.
+    saved_instrument_base_rate: 0.46
+    saved_instrument_trust_weight: 0.55       # z-units -> logit
+    saved_instrument_liquidity_weight: 0.45
+
+  # Module 07 - pre-window history. Order frequency is NOT latent-driven
+  # (decision A11): it appears in no Phase 1 hypothesis.
+  pre_window:
+    min_days_between_orders: 21        # caps pre_window_orders by tenure_days
+    # No switch-to-COD modelling pre-window: the switch mechanism is an
+    # in-window behaviour tied to a live payment session. Documented, not silent.
+    model_switch_to_cod: false
+
   # Centring constants used by the logits. Reference points, not slopes.
   centering:
     seller_rating_center: 4.30
@@ -101,11 +208,55 @@ latents:
   liquidity_geo_tier_shift: {METRO: 0.45, TIER1: 0.15, TIER2: -0.15, TIER3: -0.45}
   price_sensitivity_liquidity_corr: -0.30
 
-# Decision A11 - the latent -> pre-window history parametrisation. PENDING.
-# Module 07 is BLOCKED until this is ruled on. Left null deliberately: a
-# placeholder value here would be an unflagged assumption, the worst failure
-# mode in this project.
-latent_to_history: null
+# -----------------------------------------------------------------------------
+# LATENT -> PRE-WINDOW HISTORY - decision A11 (RULED). The load-bearing one.
+#
+# Pre-window and in-window behaviour SHARE THE SAME LATENT SLOPES. That shared
+# structure is exactly why prior RTO predicts future RTO (H3 / BR-02) and prior
+# COD predicts future COD (BR-03). Break it and the confounding becomes noise:
+# pit_cod_share (+2.20) and pit_rto_rate_shrunk (+2.80) -- the two strongest
+# observables in the project -- would carry no signal, and the naive-vs-adjusted
+# gap this project exists to produce would collapse toward zero.
+#
+# NO NEW SLOPES. The blocks below declare only which already-approved
+# coefficients are re-used, plus two new INTERCEPTS. Order frequency is
+# deliberately NOT latent-driven: it appears in no Phase 1 hypothesis, so
+# inventing a coefficient for it would be an unanchored assumption.
+# -----------------------------------------------------------------------------
+latent_to_history:
+  # pre_window_orders: neg-binomial per distributions.pre_window_orders, capped
+  # by tenure_days. NOT latent-driven.
+  orders_latent_driven: false
+  orders_cap_basis: tenure_days
+  # Which coefficients each pre-window draw re-uses, by dotted path. The
+  # generator resolves these from params rather than restating any number, so
+  # CAL-09 sees one value per coefficient and a divergence is impossible.
+  cod_reused_coefficients:
+    - cod_model.coefficients.latent_trust
+    - cod_model.coefficients.latent_liquidity
+    - cod_model.coefficients.latent_intent
+    - cod_model.coefficients.latent_price_sensitivity
+    - cod_model.coefficients.geo_tier
+  rto_reused_coefficients:
+    - rto_model.coefficients.is_cod
+    - rto_model.coefficients.latent_intent
+    - rto_model.coefficients.latent_liquidity
+    - rto_model.coefficients.latent_trust
+    - rto_model.coefficients.geo_tier
+
+# Pre-window COD draw. LEVEL only -- pi_cod0 is calibrated, nothing else moves.
+pre_window_cod_model:
+  intercept_solved: null                   # pi_cod0; machine-written
+  coefficients: {}                         # intentionally empty: slopes are
+                                           # re-used from cod_model via
+                                           # latent_to_history.cod_reused_coefficients
+  reuses: cod_model
+
+# Pre-window RTO draw. LEVEL only -- pi_rto0 is calibrated, nothing else moves.
+pre_window_rto_model:
+  intercept_solved: null                   # pi_rto0; machine-written
+  coefficients: {}
+  reuses: rto_model
 
 # -----------------------------------------------------------------------------
 # COD MODEL - spec 7.2. STEP A: intent.
@@ -196,6 +347,27 @@ conversion_model:
     device_web: -0.25
     cart_size_ge3: -0.12
   noise_sd: 0.30
+  # Decision A25 - abandon_step attribution. Deterministic, no new randomness and
+  # no new coefficient: the step is the term that contributed the largest
+  # NEGATIVE amount to the conversion logit, subject to a fixed precedence.
+  # Evaluated top to bottom; the first match wins.
+  abandon_step_precedence:
+    - step: PAYMENT_FAILURE                # set by module 11c. IMMUTABLE, always wins.
+      rule: set_by_payment_module
+    - step: FEE_REVEAL
+      rule: shipping_fee_gt0_and_largest_negative_contributor
+      term: shipping_fee_charged_gt0
+    - step: PAYMENT_PAGE
+      rule: abandoned_at_or_after_payment_page
+    - step: ADDRESS
+      rule: otherwise
+  # Decision A26 - the address hurdle is drawn BEFORE payment attempts, so a
+  # session can never both pay successfully and abandon at the address step.
+  #   11a  address-step abandonment draw
+  #   11b  payment-page-reach / fee-reveal abandonment draw
+  #   11c  payment attempts (sessions reaching payment page AND intending prepaid)
+  #   12   assemble final conversion state + abandon_step
+  hurdle_order: ["11a", "11b", "11c", "12"]
 
 # -----------------------------------------------------------------------------
 # PAYMENT FAILURE - spec 10.2. Runs BEFORE the conversion model.
@@ -393,36 +565,82 @@ censoring:
   min_censored_share_of_late_window: 0.03  # DQ-14 floor
 
 # -----------------------------------------------------------------------------
-# IMPUTATION - decision A18 (own judgement)
+# PRIORS - decision A19 (RULED). DECLARED CONSTANTS, never computed from the
+# generated population.
 #
-# ONE RULE: every rate feature with a zero denominator imputes to its declared
-# population prior. Never to zero (which asserts evidence that does not exist),
-# and never to a value computed from realised outcomes (which would leak).
-# Every prior below is a DECLARED CONSTANT, not measured from generated data.
+# Computing a shrinkage prior from the realised data would make every customer's
+# Stage-1 risk feature a function of the window's Stage-5 outcomes: a
+# population-level leak that NO column-level check would catch, and one that
+# would inflate LK-03's AUC with no obviously-wrong column in the view. It would
+# also move on every bisection iteration, making the feature non-reproducible.
+#
+# LK-06 (HARD) asserts the prior used at runtime equals the constant below.
 # -----------------------------------------------------------------------------
-imputation:
-  pit_cod_share_prior: 0.620
-  pit_rto_rate_prior: 0.165                # decision A19: also the EB prior mean
-  pit_payment_failure_rate_prior: 0.175
-  pit_avg_order_value_prior: 920           # mean order_value, decision A5
+priors:
+  rto_prior: 0.165                         # EB prior mean for pit_rto_rate_shrunk
+  cod_prior: 0.620
   shrinkage_k: 8                           # spec 3.7
+
+# -----------------------------------------------------------------------------
+# MISSING DATA - decision A18 (RULED). DO NOT IMPUTE.
+#
+# Imputing a value that is then multiplied by +2.20 (pit_cod_share) manufactures
+# a signal that does not exist. A historyless customer's COD share is not 0.62
+# and is not 0 -- it is UNKNOWN, and the table says so.
+#
+# pit_rto_rate_shrunk is the exception: empirical-Bayes shrinkage at n=0 returns
+# the declared prior by construction, which is a computed value rather than an
+# imputed one. It stays NOT NULL.
+#
+# In the GENERATOR'S OWN logits a NULL feature contributes exactly 0.0 -- the
+# term is switched off, not filled in. The level difference for historyless
+# customers is already carried by `pit_is_new_customer` (+0.70 COD / +0.45 RTO),
+# an already-declared coefficient. NO NEW COEFFICIENT IS INTRODUCED.
+#
+# Analyst-side models use the missing-indicator pattern via pit_has_history.
+# -----------------------------------------------------------------------------
+missing_data:
+  policy: null_with_indicator
+  indicator_column: pit_has_history         # TRUE when pit_orders_placed > 0
+  nullable_when_no_history:
+    - pit_cod_share
+    - pit_avg_order_value
+    - pit_payment_failure_rate
+    - pit_days_since_last_order
+  never_null:
+    - pit_rto_rate_shrunk                   # shrinks fully to priors.rto_prior at n=0
+  logit_contribution_when_null: 0.0
 
 # -----------------------------------------------------------------------------
 # CALIBRATION SEARCH - solver configuration. Decisions A13, A14, A15.
 # These are SOLVER settings, not business assumptions.
 # -----------------------------------------------------------------------------
 calibration_search:
+  # Five calibrated intercepts. ALL ARE LEVELS. Zero slopes move.
+  # CAL-09 covers all five blocks.
+  pre_window_cod_model:
+    bracket: [-3.0, 3.0]                   # pi_cod0; decision A11
+    loop_modules: ["07"]
+    target: pre_window_cod_share
+  pre_window_rto_model:
+    bracket: [-6.0, 0.0]                   # pi_rto0; decision A11
+    loop_modules: ["07"]
+    target: pre_window_rto_rate
   cod_model:
     bracket: [-2.0, 2.0]                   # spec 7.3; beta_0 expected ~ +0.30
-    loop_modules: [10, 11, 12, 13]         # decision A15: 08-09 invariant, cached
+    # Decision A15: 08-09 are invariant to beta_0 and are cached.
+    # Decision A26: module 11 is split into 11a / 11b / 11c.
+    loop_modules: ["10", "11a", "11b", "11c", "12", "13"]
     target: cod_share
   rto_model:
+    # Decision A7: calibrated against the BLENDED rate alone. CAL-03/04 are
+    # emergent and are reported, not solved for.
     bracket: [-6.0, 0.0]                   # decision A14: spec gave no bracket
-    loop_modules: [15, 16, 17]
+    loop_modules: ["15", "16", "17"]
     target: rto_rate_blended
   conversion_model:
     bracket: [-4.0, 4.0]
-    loop_modules: [12]
+    loop_modules: ["11a", "11b", "12"]
     target: checkout_conversion
   # Decision A13: bisect on the REALISED draw using common random numbers, which
   # makes the realised share a monotone step function of the intercept. Tolerance
@@ -454,9 +672,13 @@ ground_truth:
   gt_03:
     rule: ame_lt_adjusted_lt_naive
     min_gap_closed: 0.35
+  # GT-02 reformulated relatively per decision A7. The absolute [18.5, 21.5]
+  # band is DROPPED, not replaced with another hard-coded number: it was
+  # narrower than CAL-03/04's tolerances jointly permit, so a dataset could pass
+  # both calibration tests and still fail GT-02 through no fault of its own.
+  # The band's protective job now belongs to CAL-11.
   gt_02:
-    rule: naive_gap_gt_ame                 # was "> 13.4"; now relative
-    naive_gap_band_pp: [18.5, 21.5]
+    rule: naive_gap_gt_ame_and_cal_11_passes
   gt_05:
     auc_ceiling_band: [0.74, 0.79]
     model_within: 0.03
@@ -484,6 +706,7 @@ leakage_guard:
     - pit_avg_order_value
     - pit_is_new_customer
     - pit_has_clean_record
+    - pit_has_history                # decision A18 - the missing indicator
     - pit_risk_tier_rule_based       # decision A21 - Stage 1/2 version only
     - has_saved_prepaid_instrument
     - age_bucket

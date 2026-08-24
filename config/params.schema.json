@@ -1,512 +1,1309 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "params.yaml — Phase 2B parameter registry",
-  "description": "Structural contract for config/params.yaml. This schema validates SHAPE, not values: it asserts that every required block and every declared coefficient is present and correctly typed, so that a deleted slope or a renamed block fails at load time instead of producing a quietly-wrong dataset. Coefficient VALUES are deliberately unconstrained here — they are governed by CAL-09 (immutability against the runtime ledger), not by a range check.",
+  "title": "params.yaml \u2014 Phase 2B parameter registry",
+  "description": "Structural contract for config/params.yaml. This schema validates SHAPE, not values: it asserts that every required block and every declared coefficient is present and correctly typed, so that a deleted slope or a renamed block fails at load time instead of producing a quietly-wrong dataset. Coefficient VALUES are deliberately unconstrained here \u2014 they are governed by CAL-09 (immutability against the runtime ledger), not by a range check.",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "meta", "scale", "calibration_targets", "reported_not_tested", "distributions",
-    "latents", "latent_to_history", "cod_model", "rto_model", "conversion_model",
-    "payment_failure", "rto_reasons", "economics", "fulfilment", "censoring",
-    "imputation", "calibration_search", "ground_truth", "leakage_guard", "seed",
+    "meta",
+    "scale",
+    "calibration_targets",
+    "selection_share_gate",
+    "reported_not_tested",
+    "distributions",
+    "latents",
+    "latent_to_history",
+    "cod_model",
+    "rto_model",
+    "conversion_model",
+    "pre_window_cod_model",
+    "pre_window_rto_model",
+    "payment_failure",
+    "rto_reasons",
+    "economics",
+    "fulfilment",
+    "censoring",
+    "priors",
+    "missing_data",
+    "calibration_search",
+    "ground_truth",
+    "leakage_guard",
+    "seed",
     "calibration"
   ],
-
   "$defs": {
     "target": {
       "type": "object",
-      "required": ["target"],
+      "required": [
+        "target"
+      ],
       "properties": {
-        "target": {"type": "number"},
-        "tol": {"type": "number", "minimum": 0},
-        "lo": {"type": "number"},
-        "hi": {"type": "number"},
-        "severity": {"enum": ["HARD", "SOFT"]}
+        "target": {
+          "type": "number"
+        },
+        "tol": {
+          "type": "number",
+          "minimum": 0
+        },
+        "lo": {
+          "type": "number"
+        },
+        "hi": {
+          "type": "number"
+        },
+        "severity": {
+          "enum": [
+            "HARD",
+            "SOFT"
+          ]
+        },
+        "emergent": {
+          "description": "Decision A7 - reported as emergent, never solved for.",
+          "type": "boolean"
+        }
       }
     },
     "geoTierMap": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["METRO", "TIER1", "TIER2", "TIER3"],
+      "required": [
+        "METRO",
+        "TIER1",
+        "TIER2",
+        "TIER3"
+      ],
       "properties": {
-        "METRO": {"type": "number"}, "TIER1": {"type": "number"},
-        "TIER2": {"type": "number"}, "TIER3": {"type": "number"}
+        "METRO": {
+          "type": "number"
+        },
+        "TIER1": {
+          "type": "number"
+        },
+        "TIER2": {
+          "type": "number"
+        },
+        "TIER3": {
+          "type": "number"
+        }
       }
     },
     "categoryMap": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["FASHION", "BEAUTY", "HOME_KITCHEN", "MOBILE_ACC", "ELECTRONICS", "GROCERY_FMCG"],
+      "required": [
+        "FASHION",
+        "BEAUTY",
+        "HOME_KITCHEN",
+        "MOBILE_ACC",
+        "ELECTRONICS",
+        "GROCERY_FMCG"
+      ],
       "properties": {
-        "FASHION": {"type": "number"}, "BEAUTY": {"type": "number"},
-        "HOME_KITCHEN": {"type": "number"}, "MOBILE_ACC": {"type": "number"},
-        "ELECTRONICS": {"type": "number"}, "GROCERY_FMCG": {"type": "number"}
+        "FASHION": {
+          "type": "number"
+        },
+        "BEAUTY": {
+          "type": "number"
+        },
+        "HOME_KITCHEN": {
+          "type": "number"
+        },
+        "MOBILE_ACC": {
+          "type": "number"
+        },
+        "ELECTRONICS": {
+          "type": "number"
+        },
+        "GROCERY_FMCG": {
+          "type": "number"
+        }
       }
     },
     "weightBandMap": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["LIGHT", "MEDIUM", "HEAVY"],
+      "required": [
+        "LIGHT",
+        "MEDIUM",
+        "HEAVY"
+      ],
       "properties": {
-        "LIGHT": {"type": "number"}, "MEDIUM": {"type": "number"}, "HEAVY": {"type": "number"}
+        "LIGHT": {
+          "type": "number"
+        },
+        "MEDIUM": {
+          "type": "number"
+        },
+        "HEAVY": {
+          "type": "number"
+        }
       }
     },
     "railMap": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["UPI_INTENT", "UPI_COLLECT", "CARD", "NETBANKING", "WALLET"],
+      "required": [
+        "UPI_INTENT",
+        "UPI_COLLECT",
+        "CARD",
+        "NETBANKING",
+        "WALLET"
+      ],
       "properties": {
-        "UPI_INTENT": {"type": "number"}, "UPI_COLLECT": {"type": "number"},
-        "CARD": {"type": "number"}, "NETBANKING": {"type": "number"},
-        "WALLET": {"type": "number"}
+        "UPI_INTENT": {
+          "type": "number"
+        },
+        "UPI_COLLECT": {
+          "type": "number"
+        },
+        "CARD": {
+          "type": "number"
+        },
+        "NETBANKING": {
+          "type": "number"
+        },
+        "WALLET": {
+          "type": "number"
+        }
       }
     },
     "reasonKeys": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "CUSTOMER_REFUSED_CHANGED_MIND", "CUSTOMER_UNREACHABLE_NO_ANSWER",
-        "ADDRESS_INCORRECT_INCOMPLETE", "INSUFFICIENT_CASH_AT_DELIVERY",
-        "NEVER_ORDERED_LOW_INTENT", "COURIER_OPERATIONAL_FAILURE",
-        "CUSTOMER_UNAVAILABLE_GENUINE", "PINCODE_SERVICEABILITY_FAILURE",
-        "DELIVERY_ATTEMPTED_OUTSIDE_WINDOW", "OTHER_UNCLASSIFIED"
+        "CUSTOMER_REFUSED_CHANGED_MIND",
+        "CUSTOMER_UNREACHABLE_NO_ANSWER",
+        "ADDRESS_INCORRECT_INCOMPLETE",
+        "INSUFFICIENT_CASH_AT_DELIVERY",
+        "NEVER_ORDERED_LOW_INTENT",
+        "COURIER_OPERATIONAL_FAILURE",
+        "CUSTOMER_UNAVAILABLE_GENUINE",
+        "PINCODE_SERVICEABILITY_FAILURE",
+        "DELIVERY_ATTEMPTED_OUTSIDE_WINDOW",
+        "OTHER_UNCLASSIFIED"
       ],
-      "patternProperties": {"^[A-Z_]+$": {}}
+      "patternProperties": {
+        "^[A-Z_]+$": {}
+      }
     },
     "interceptSolved": {
       "description": "MACHINE-WRITTEN ONLY. Null until the calibrator runs.",
-      "type": ["number", "null"]
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "preWindowModel": {
+      "description": "Decision A11 - a LEVEL-only block. Its intercept is calibrated; its slopes are re-used from the model named in `reuses`, so no coefficient is restated and CAL-09 sees exactly one value per coefficient.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "intercept_solved",
+        "coefficients",
+        "reuses"
+      ],
+      "properties": {
+        "intercept_solved": {
+          "$ref": "#/$defs/interceptSolved"
+        },
+        "coefficients": {
+          "description": "MUST stay empty. A coefficient here would be a second, divergent copy of an approved slope.",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "reuses": {
+          "enum": [
+            "cod_model",
+            "rto_model"
+          ]
+        }
+      }
     }
   },
-
   "properties": {
     "meta": {
       "type": "object",
-      "required": ["version", "currency", "window_days", "window_start", "generator_version"],
+      "required": [
+        "version",
+        "currency",
+        "window_days",
+        "window_start",
+        "generator_version"
+      ],
       "properties": {
-        "version": {"type": "string"},
-        "currency": {"const": "INR"},
-        "window_days": {"type": "integer", "minimum": 1},
+        "version": {
+          "type": "string"
+        },
+        "currency": {
+          "const": "INR"
+        },
+        "window_days": {
+          "type": "integer",
+          "minimum": 1
+        },
         "window_start": {},
-        "generator_version": {"type": "string"}
+        "generator_version": {
+          "type": "string"
+        }
       }
     },
-
     "scale": {
       "type": "object",
       "required": [
-        "n_customers", "n_sellers", "n_products", "n_geographies", "target_orders",
-        "checkout_conversion_target", "population_annual_orders",
-        "sample_to_quarter_factor", "quarter_to_year_factor", "annualization_factor"
+        "n_customers",
+        "n_sellers",
+        "n_products",
+        "n_geographies",
+        "target_orders",
+        "checkout_conversion_target",
+        "population_annual_orders",
+        "sample_to_quarter_factor",
+        "quarter_to_year_factor",
+        "annualization_factor"
       ],
       "properties": {
-        "n_customers": {"type": "integer", "minimum": 1},
-        "n_sellers": {"type": "integer", "minimum": 1},
-        "n_products": {"type": "integer", "minimum": 1},
-        "n_geographies": {"type": "integer", "minimum": 1},
-        "target_orders": {"type": "integer", "minimum": 1},
-        "checkout_conversion_target": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
-        "population_annual_orders": {"type": "integer", "minimum": 1},
-        "sample_to_quarter_factor": {"type": "number", "minimum": 1},
-        "quarter_to_year_factor": {"type": "number", "minimum": 1},
-        "annualization_factor": {"type": "number", "minimum": 1}
+        "n_customers": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "n_sellers": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "n_products": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "n_geographies": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "target_orders": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "checkout_conversion_target": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 1
+        },
+        "population_annual_orders": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sample_to_quarter_factor": {
+          "type": "number",
+          "minimum": 1
+        },
+        "quarter_to_year_factor": {
+          "type": "number",
+          "minimum": 1
+        },
+        "annualization_factor": {
+          "type": "number",
+          "minimum": 1
+        }
       }
     },
-
     "calibration_targets": {
       "type": "object",
       "required": [
-        "cod_share", "prepaid_share", "rto_rate_cod", "rto_rate_prepaid",
-        "rto_rate_blended", "checkout_conversion", "pct_cod_from_payment_failure",
-        "addressable_share_of_rto", "mean_gmv_per_order", "median_order_value",
-        "auc_ceiling"
+        "cod_share",
+        "prepaid_share",
+        "rto_rate_cod",
+        "rto_rate_prepaid",
+        "rto_rate_blended",
+        "checkout_conversion",
+        "pct_cod_from_payment_failure",
+        "addressable_share_of_rto",
+        "mean_gmv_per_order",
+        "median_order_value",
+        "auc_ceiling",
+        "pre_window_cod_share",
+        "pre_window_rto_rate"
       ],
-      "additionalProperties": {"$ref": "#/$defs/target"}
+      "additionalProperties": {
+        "$ref": "#/$defs/target"
+      }
     },
-
-    "reported_not_tested": {"type": "object"},
-
+    "reported_not_tested": {
+      "type": "object"
+    },
     "distributions": {
       "type": "object",
       "required": [
-        "geo_tier_weights", "category_weights", "category_mean_gmv",
-        "category_gmv_sigma", "gmv_truncation", "seller_rating", "product_rating",
-        "review_count", "pre_window_orders", "cart_size_weights",
-        "device_type_weights", "weight_band_weights", "centering"
+        "geo_tier_weights",
+        "category_weights",
+        "category_mean_gmv",
+        "category_gmv_sigma",
+        "gmv_truncation",
+        "seller_rating",
+        "product_rating",
+        "review_count",
+        "pre_window_orders",
+        "cart_size_weights",
+        "device_type_weights",
+        "weight_band_weights",
+        "centering",
+        "demand",
+        "geography",
+        "seller",
+        "product",
+        "customer",
+        "pre_window"
       ],
       "properties": {
-        "geo_tier_weights": {"$ref": "#/$defs/geoTierMap"},
-        "category_weights": {"$ref": "#/$defs/categoryMap"},
-        "category_mean_gmv": {"$ref": "#/$defs/categoryMap"},
-        "category_gmv_sigma": {"$ref": "#/$defs/categoryMap"},
-        "gmv_truncation": {
-          "type": "object", "required": ["lo", "hi"],
-          "properties": {"lo": {"type": "number", "minimum": 0}, "hi": {"type": "number"}}
+        "geo_tier_weights": {
+          "$ref": "#/$defs/geoTierMap"
         },
-        "weight_band_weights": {"$ref": "#/$defs/weightBandMap"},
+        "category_weights": {
+          "$ref": "#/$defs/categoryMap"
+        },
+        "category_mean_gmv": {
+          "$ref": "#/$defs/categoryMap"
+        },
+        "category_gmv_sigma": {
+          "$ref": "#/$defs/categoryMap"
+        },
+        "gmv_truncation": {
+          "type": "object",
+          "required": [
+            "lo",
+            "hi"
+          ],
+          "properties": {
+            "lo": {
+              "type": "number",
+              "minimum": 0
+            },
+            "hi": {
+              "type": "number"
+            }
+          }
+        },
+        "weight_band_weights": {
+          "$ref": "#/$defs/weightBandMap"
+        },
         "centering": {
           "type": "object",
           "required": [
-            "seller_rating_center", "product_rating_center",
-            "est_delivery_days_center", "discount_pct_center",
-            "discount_pct_unit", "order_value_scale"
+            "seller_rating_center",
+            "product_rating_center",
+            "est_delivery_days_center",
+            "discount_pct_center",
+            "discount_pct_unit",
+            "order_value_scale"
           ],
-          "additionalProperties": {"type": "number"}
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "demand": {
+          "description": "[A27 PROPOSED] Distribution the spec requires but never quantified. Not yet approved; see decision_register.md A27.",
+          "type": "object",
+          "minProperties": 1
+        },
+        "geography": {
+          "description": "[A27 PROPOSED] Distribution the spec requires but never quantified. Not yet approved; see decision_register.md A27.",
+          "type": "object",
+          "minProperties": 1
+        },
+        "seller": {
+          "description": "[A27 PROPOSED] Distribution the spec requires but never quantified. Not yet approved; see decision_register.md A27.",
+          "type": "object",
+          "minProperties": 1
+        },
+        "product": {
+          "description": "[A27 PROPOSED] Distribution the spec requires but never quantified. Not yet approved; see decision_register.md A27.",
+          "type": "object",
+          "minProperties": 1
+        },
+        "customer": {
+          "description": "[A27 PROPOSED] Distribution the spec requires but never quantified. Not yet approved; see decision_register.md A27.",
+          "type": "object",
+          "minProperties": 1
+        },
+        "pre_window": {
+          "description": "[A27 PROPOSED] Distribution the spec requires but never quantified. Not yet approved; see decision_register.md A27.",
+          "type": "object",
+          "minProperties": 1
         }
       }
     },
-
     "latents": {
       "type": "object",
-      "required": ["correlations", "liquidity_geo_tier_shift"],
+      "required": [
+        "correlations",
+        "liquidity_geo_tier_shift"
+      ],
       "properties": {
         "correlations": {
           "type": "object",
-          "required": ["trust_liquidity", "intent_liquidity", "intent_trust"],
-          "additionalProperties": {"type": "number", "minimum": -1, "maximum": 1}
-        },
-        "liquidity_geo_tier_shift": {"$ref": "#/$defs/geoTierMap"}
-      }
-    },
-
-    "latent_to_history": {
-      "description": "Decision A11 — PENDING. Null blocks module 07 rather than letting an unflagged placeholder through.",
-      "type": ["object", "null"]
-    },
-
-    "cod_model": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["intercept_solved", "coefficients", "noise_sd"],
-      "properties": {
-        "intercept_solved": {"$ref": "#/$defs/interceptSolved"},
-        "noise_sd": {"type": "number", "exclusiveMinimum": 0},
-        "coefficients": {
-          "type": "object",
-          "additionalProperties": false,
           "required": [
-            "latent_trust", "latent_liquidity", "latent_intent",
-            "latent_price_sensitivity", "pit_cod_share", "log1p_prepaid_success",
-            "is_new_customer", "log1p_orders_delivered", "payment_failure_rate",
-            "has_saved_instrument", "geo_tier", "cod_cultural_index_z",
-            "log_order_value", "log_order_value_sq", "seller_rating_centered",
-            "product_rating_centered", "log1p_review_count_centered",
-            "est_delivery_days_centered", "discount_pct_centered", "cart_size_ge3",
-            "category", "is_month_end"
+            "trust_liquidity",
+            "intent_liquidity",
+            "intent_trust"
           ],
-          "properties": {
-            "geo_tier": {"$ref": "#/$defs/geoTierMap"},
-            "category": {"$ref": "#/$defs/categoryMap"}
-          },
-          "patternProperties": {"^[a-z0-9_]+$": {"type": ["number", "object"]}}
+          "additionalProperties": {
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1
+          }
+        },
+        "liquidity_geo_tier_shift": {
+          "$ref": "#/$defs/geoTierMap"
         }
       }
     },
-
-    "rto_model": {
+    "latent_to_history": {
+      "description": "Decision A11. Declares WHICH approved coefficients the pre-window draws re-use. Contains no coefficient values.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["intercept_solved", "coefficients", "post_dispatch_shock"],
+      "required": [
+        "orders_latent_driven",
+        "orders_cap_basis",
+        "cod_reused_coefficients",
+        "rto_reused_coefficients"
+      ],
       "properties": {
-        "intercept_solved": {"$ref": "#/$defs/interceptSolved"},
-        "coefficients": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "is_cod", "paid_via_switch", "pit_rto_rate_shrunk", "latent_intent",
-            "latent_liquidity", "latent_trust", "is_new_customer",
-            "log1p_orders_delivered", "pit_cod_share", "geo_tier",
-            "serviceability_z", "address_completeness", "seller_sla_breach_rate",
-            "seller_rating_centered", "product_rating_centered",
-            "log1p_review_count_centered", "log_order_value",
-            "discount_pct_centered", "cart_size_ge3", "est_delivery_days_centered",
-            "category", "month_end_x_cod"
-          ],
-          "properties": {
-            "is_cod": {
-              "description": "THE PLANTED CAUSAL EFFECT. Immutable (CLAUDE.md invariant).",
-              "const": 1.60
-            },
-            "geo_tier": {"$ref": "#/$defs/geoTierMap"},
-            "category": {"$ref": "#/$defs/categoryMap"}
-          },
-          "patternProperties": {"^[a-z0-9_]+$": {"type": ["number", "object"]}}
+        "orders_latent_driven": {
+          "description": "False: order frequency appears in no Phase 1 hypothesis, so no coefficient is invented for it.",
+          "const": false
         },
-        "post_dispatch_shock": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["courier_reliability_z_neg", "attempt_delay_days",
-                       "seller_dispatch_late", "noise_sd"],
-          "properties": {
-            "courier_reliability_z_neg": {"type": "number"},
-            "attempt_delay_days": {"type": "number"},
-            "seller_dispatch_late": {"type": "number"},
-            "noise_sd": {"type": "number", "exclusiveMinimum": 0}
+        "orders_cap_basis": {
+          "const": "tenure_days"
+        },
+        "cod_reused_coefficients": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_]+\\.coefficients\\.[a-z_]+$"
+          }
+        },
+        "rto_reused_coefficients": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_]+\\.coefficients\\.[a-z_]+$"
           }
         }
       }
     },
-
-    "conversion_model": {
-      "description": "Decision A2 — minimal 7-slope model, third calibrated intercept.",
+    "cod_model": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["intercept_solved", "coefficients", "noise_sd"],
+      "required": [
+        "intercept_solved",
+        "coefficients",
+        "noise_sd"
+      ],
       "properties": {
-        "intercept_solved": {"$ref": "#/$defs/interceptSolved"},
-        "noise_sd": {"type": "number", "exclusiveMinimum": 0},
+        "intercept_solved": {
+          "$ref": "#/$defs/interceptSolved"
+        },
+        "noise_sd": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
         "coefficients": {
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "pit_is_new_customer", "log_order_value", "address_completeness",
-            "est_delivery_days_centered", "shipping_fee_charged_gt0",
-            "device_web", "cart_size_ge3"
+            "latent_trust",
+            "latent_liquidity",
+            "latent_intent",
+            "latent_price_sensitivity",
+            "pit_cod_share",
+            "log1p_prepaid_success",
+            "is_new_customer",
+            "log1p_orders_delivered",
+            "payment_failure_rate",
+            "has_saved_instrument",
+            "geo_tier",
+            "cod_cultural_index_z",
+            "log_order_value",
+            "log_order_value_sq",
+            "seller_rating_centered",
+            "product_rating_centered",
+            "log1p_review_count_centered",
+            "est_delivery_days_centered",
+            "discount_pct_centered",
+            "cart_size_ge3",
+            "category",
+            "is_month_end"
           ],
-          "patternProperties": {"^[a-z0-9_]+$": {"type": "number"}}
+          "properties": {
+            "geo_tier": {
+              "$ref": "#/$defs/geoTierMap"
+            },
+            "category": {
+              "$ref": "#/$defs/categoryMap"
+            }
+          },
+          "patternProperties": {
+            "^[a-z0-9_]+$": {
+              "type": [
+                "number",
+                "object"
+              ]
+            }
+          }
         }
       }
     },
-
+    "rto_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "intercept_solved",
+        "coefficients",
+        "post_dispatch_shock"
+      ],
+      "properties": {
+        "intercept_solved": {
+          "$ref": "#/$defs/interceptSolved"
+        },
+        "coefficients": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "is_cod",
+            "paid_via_switch",
+            "pit_rto_rate_shrunk",
+            "latent_intent",
+            "latent_liquidity",
+            "latent_trust",
+            "is_new_customer",
+            "log1p_orders_delivered",
+            "pit_cod_share",
+            "geo_tier",
+            "serviceability_z",
+            "address_completeness",
+            "seller_sla_breach_rate",
+            "seller_rating_centered",
+            "product_rating_centered",
+            "log1p_review_count_centered",
+            "log_order_value",
+            "discount_pct_centered",
+            "cart_size_ge3",
+            "est_delivery_days_centered",
+            "category",
+            "month_end_x_cod"
+          ],
+          "properties": {
+            "is_cod": {
+              "description": "THE PLANTED CAUSAL EFFECT. Immutable (CLAUDE.md invariant).",
+              "const": 1.6
+            },
+            "geo_tier": {
+              "$ref": "#/$defs/geoTierMap"
+            },
+            "category": {
+              "$ref": "#/$defs/categoryMap"
+            }
+          },
+          "patternProperties": {
+            "^[a-z0-9_]+$": {
+              "type": [
+                "number",
+                "object"
+              ]
+            }
+          }
+        },
+        "post_dispatch_shock": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "courier_reliability_z_neg",
+            "attempt_delay_days",
+            "seller_dispatch_late",
+            "noise_sd"
+          ],
+          "properties": {
+            "courier_reliability_z_neg": {
+              "type": "number"
+            },
+            "attempt_delay_days": {
+              "type": "number"
+            },
+            "seller_dispatch_late": {
+              "type": "number"
+            },
+            "noise_sd": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        }
+      }
+    },
+    "conversion_model": {
+      "description": "Decision A2 \u2014 minimal 7-slope model, third calibrated intercept.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "intercept_solved",
+        "coefficients",
+        "noise_sd",
+        "abandon_step_precedence",
+        "hurdle_order"
+      ],
+      "properties": {
+        "intercept_solved": {
+          "$ref": "#/$defs/interceptSolved"
+        },
+        "noise_sd": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "coefficients": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "pit_is_new_customer",
+            "log_order_value",
+            "address_completeness",
+            "est_delivery_days_centered",
+            "shipping_fee_charged_gt0",
+            "device_web",
+            "cart_size_ge3"
+          ],
+          "patternProperties": {
+            "^[a-z0-9_]+$": {
+              "type": "number"
+            }
+          }
+        },
+        "abandon_step_precedence": {
+          "description": "Decision A25. Evaluated top to bottom; first match wins.",
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "type": "object",
+            "required": [
+              "step",
+              "rule"
+            ],
+            "properties": {
+              "step": {
+                "enum": [
+                  "ADDRESS",
+                  "PAYMENT_PAGE",
+                  "PAYMENT_FAILURE",
+                  "FEE_REVEAL"
+                ]
+              },
+              "rule": {
+                "type": "string"
+              },
+              "term": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "hurdle_order": {
+          "description": "Decision A26. The address hurdle runs BEFORE payment attempts.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "payment_failure": {
       "type": "object",
       "required": [
-        "rail_mix", "first_attempt_failure", "customer_failure_multiplier",
-        "downtime_hour_share", "downtime_multiplier", "p_retry", "retry_success",
-        "terminal", "switch_rail_success", "failure_reason_mix"
+        "rail_mix",
+        "first_attempt_failure",
+        "customer_failure_multiplier",
+        "downtime_hour_share",
+        "downtime_multiplier",
+        "p_retry",
+        "retry_success",
+        "terminal",
+        "switch_rail_success",
+        "failure_reason_mix"
       ],
       "properties": {
-        "rail_mix": {"$ref": "#/$defs/railMap"},
-        "first_attempt_failure": {"$ref": "#/$defs/railMap"},
-        "p_retry": {"type": "number", "minimum": 0, "maximum": 1},
-        "retry_success": {"type": "number", "minimum": 0, "maximum": 1},
-        "switch_rail_success": {"type": "number", "minimum": 0, "maximum": 1},
+        "rail_mix": {
+          "$ref": "#/$defs/railMap"
+        },
+        "first_attempt_failure": {
+          "$ref": "#/$defs/railMap"
+        },
+        "p_retry": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "retry_success": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "switch_rail_success": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
         "terminal": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["switch_to_cod", "switch_rail", "abandon"],
+          "required": [
+            "switch_to_cod",
+            "switch_rail",
+            "abandon"
+          ],
           "properties": {
-            "switch_to_cod": {"type": "number", "minimum": 0, "maximum": 1},
-            "switch_rail": {"type": "number", "minimum": 0, "maximum": 1},
-            "abandon": {"type": "number", "minimum": 0, "maximum": 1}
+            "switch_to_cod": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "switch_rail": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "abandon": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
           }
         },
         "failure_reason_mix": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["TIMEOUT", "BANK_DECLINE", "OTP_FAILURE", "PSP_DOWNTIME",
-                       "INSUFFICIENT_FUNDS", "USER_CANCELLED"],
-          "patternProperties": {"^[A-Z_]+$": {"type": "number", "minimum": 0, "maximum": 1}}
+          "required": [
+            "TIMEOUT",
+            "BANK_DECLINE",
+            "OTP_FAILURE",
+            "PSP_DOWNTIME",
+            "INSUFFICIENT_FUNDS",
+            "USER_CANCELLED"
+          ],
+          "patternProperties": {
+            "^[A-Z_]+$": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
         }
       }
     },
-
     "rto_reasons": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["base_weights", "class_map", "driver_weights", "gates",
-                   "frozen_hash", "ndr_code_map"],
+      "required": [
+        "base_weights",
+        "class_map",
+        "driver_weights",
+        "gates",
+        "frozen_hash",
+        "ndr_code_map"
+      ],
       "properties": {
         "base_weights": {
           "allOf": [
-            {"$ref": "#/$defs/reasonKeys"},
-            {"additionalProperties": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}}
+            {
+              "$ref": "#/$defs/reasonKeys"
+            },
+            {
+              "additionalProperties": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 1
+              }
+            }
           ]
         },
         "class_map": {
           "allOf": [
-            {"$ref": "#/$defs/reasonKeys"},
-            {"additionalProperties": {"enum": ["ADDRESSABLE", "STRUCTURAL"]}}
+            {
+              "$ref": "#/$defs/reasonKeys"
+            },
+            {
+              "additionalProperties": {
+                "enum": [
+                  "ADDRESSABLE",
+                  "STRUCTURAL"
+                ]
+              }
+            }
           ]
         },
         "driver_weights": {
           "allOf": [
-            {"$ref": "#/$defs/reasonKeys"},
-            {"additionalProperties": {"type": "object",
-                                      "additionalProperties": {"type": "number"}}}
+            {
+              "$ref": "#/$defs/reasonKeys"
+            },
+            {
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "number"
+                }
+              }
+            }
           ]
         },
-        "gates": {"type": "object"},
+        "gates": {
+          "type": "object"
+        },
         "frozen_hash": {
           "description": "CAL-10. sha256 over {base_weights, driver_weights, class_map}.",
-          "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
         },
         "ndr_code_map": {
           "allOf": [
-            {"$ref": "#/$defs/reasonKeys"},
-            {"additionalProperties": {"type": "string"}}
+            {
+              "$ref": "#/$defs/reasonKeys"
+            },
+            {
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
           ]
         }
       }
     },
-
     "economics": {
       "type": "object",
       "required": [
-        "platform_discount_pct", "cogs_ratio_mean", "cogs_ratio_sd",
-        "cogs_ratio_bounds", "forward_freight_base",
-        "forward_freight_weight_factor", "reverse_freight_multiplier", "packaging",
-        "pg_fee_rate", "pg_fee_rate_by_rail", "cod_handling_rate",
-        "cod_handling_fixed", "cod_failed_attempt_fee", "reverse_handling_base",
-        "shrink_rate_by_category", "support_ndr_rto", "support_delivered",
-        "wc_annual_rate", "wc_days_blocked", "ops_allocation_delivered",
-        "shipping_fee_charged", "cod_fee_charged", "cogs_value_basis",
-        "preship_cancel_economics", "reconciliation"
+        "platform_discount_pct",
+        "cogs_ratio_mean",
+        "cogs_ratio_sd",
+        "cogs_ratio_bounds",
+        "forward_freight_base",
+        "forward_freight_weight_factor",
+        "reverse_freight_multiplier",
+        "packaging",
+        "pg_fee_rate",
+        "pg_fee_rate_by_rail",
+        "cod_handling_rate",
+        "cod_handling_fixed",
+        "cod_failed_attempt_fee",
+        "reverse_handling_base",
+        "shrink_rate_by_category",
+        "support_ndr_rto",
+        "support_delivered",
+        "wc_annual_rate",
+        "wc_days_blocked",
+        "ops_allocation_delivered",
+        "shipping_fee_charged",
+        "cod_fee_charged",
+        "cogs_value_basis",
+        "preship_cancel_economics",
+        "reconciliation"
       ],
       "properties": {
-        "forward_freight_base": {"$ref": "#/$defs/geoTierMap"},
-        "forward_freight_weight_factor": {"$ref": "#/$defs/weightBandMap"},
-        "packaging": {"$ref": "#/$defs/weightBandMap"},
-        "pg_fee_rate_by_rail": {"$ref": "#/$defs/railMap"},
-        "shrink_rate_by_category": {"$ref": "#/$defs/categoryMap"},
-        "cogs_value_basis": {"const": "net_revenue_if_delivered"},
-        "preship_cancel_economics": {"const": "zero_all_lines"},
+        "forward_freight_base": {
+          "$ref": "#/$defs/geoTierMap"
+        },
+        "forward_freight_weight_factor": {
+          "$ref": "#/$defs/weightBandMap"
+        },
+        "packaging": {
+          "$ref": "#/$defs/weightBandMap"
+        },
+        "pg_fee_rate_by_rail": {
+          "$ref": "#/$defs/railMap"
+        },
+        "shrink_rate_by_category": {
+          "$ref": "#/$defs/categoryMap"
+        },
+        "cogs_value_basis": {
+          "const": "net_revenue_if_delivered"
+        },
+        "preship_cancel_economics": {
+          "const": "zero_all_lines"
+        },
         "reconciliation": {
           "type": "object",
-          "required": ["prepaid_delivered_cm", "cod_delivered_cm",
-                       "cod_rto_cash_loss", "cod_rto_economic_cost",
-                       "breakeven_rto_prob", "annualised_exposure_cr"],
-          "additionalProperties": {"$ref": "#/$defs/target"}
+          "required": [
+            "prepaid_delivered_cm",
+            "cod_delivered_cm",
+            "cod_rto_cash_loss",
+            "cod_rto_economic_cost",
+            "breakeven_rto_prob",
+            "annualised_exposure_cr"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/target"
+          }
         }
       }
     },
-
     "fulfilment": {
       "type": "object",
-      "required": ["preship_cancel_rate", "max_delivery_attempts",
-                   "dispatch_lag_days", "outcome_resolution_days",
-                   "seller_dispatch_late_threshold_days"],
+      "required": [
+        "preship_cancel_rate",
+        "max_delivery_attempts",
+        "dispatch_lag_days",
+        "outcome_resolution_days",
+        "seller_dispatch_late_threshold_days"
+      ],
       "properties": {
         "preship_cancel_rate": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["customer", "seller", "system"],
-          "patternProperties": {"^[a-z]+$": {"type": "number", "minimum": 0, "maximum": 1}}
+          "required": [
+            "customer",
+            "seller",
+            "system"
+          ],
+          "patternProperties": {
+            "^[a-z]+$": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
         },
-        "max_delivery_attempts": {"type": "integer", "minimum": 1},
+        "max_delivery_attempts": {
+          "type": "integer",
+          "minimum": 1
+        },
         "outcome_resolution_days": {
-          "type": "object", "required": ["lo", "hi"],
-          "properties": {"lo": {"type": "integer", "minimum": 1},
-                         "hi": {"type": "integer", "minimum": 1}}
+          "type": "object",
+          "required": [
+            "lo",
+            "hi"
+          ],
+          "properties": {
+            "lo": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "hi": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
         }
       }
     },
-
     "censoring": {
       "description": "Decision A10.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "rto_denominator", "late_window_definition_days",
-                   "min_censored_share_of_late_window"],
+      "required": [
+        "enabled",
+        "rto_denominator",
+        "late_window_definition_days",
+        "min_censored_share_of_late_window"
+      ],
       "properties": {
-        "enabled": {"const": true},
-        "rto_denominator": {"const": "shipped_and_not_censored"},
-        "late_window_definition_days": {"type": "integer", "minimum": 1},
-        "min_censored_share_of_late_window": {"type": "number", "minimum": 0, "maximum": 1}
+        "enabled": {
+          "const": true
+        },
+        "rto_denominator": {
+          "const": "shipped_and_not_censored"
+        },
+        "late_window_definition_days": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "min_censored_share_of_late_window": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
       }
     },
-
-    "imputation": {
-      "description": "Decision A18/A19. Every prior is a declared constant, never measured from realised outcomes.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["pit_cod_share_prior", "pit_rto_rate_prior",
-                   "pit_payment_failure_rate_prior", "pit_avg_order_value_prior",
-                   "shrinkage_k"],
-      "properties": {
-        "pit_cod_share_prior": {"type": "number", "minimum": 0, "maximum": 1},
-        "pit_rto_rate_prior": {"type": "number", "minimum": 0, "maximum": 1},
-        "pit_payment_failure_rate_prior": {"type": "number", "minimum": 0, "maximum": 1},
-        "pit_avg_order_value_prior": {"type": "number", "exclusiveMinimum": 0},
-        "shrinkage_k": {"type": "number", "exclusiveMinimum": 0}
-      }
-    },
-
     "calibration_search": {
       "type": "object",
-      "required": ["cod_model", "rto_model", "conversion_model",
-                   "share_tolerance_floor", "tolerance_n_scaling", "max_iterations"],
+      "required": [
+        "pre_window_cod_model",
+        "pre_window_rto_model",
+        "cod_model",
+        "rto_model",
+        "conversion_model",
+        "share_tolerance_floor",
+        "tolerance_n_scaling",
+        "max_iterations"
+      ],
       "properties": {
-        "share_tolerance_floor": {"type": "number", "exclusiveMinimum": 0},
-        "tolerance_n_scaling": {"type": "number", "minimum": 0},
-        "max_iterations": {"type": "integer", "minimum": 1}
+        "share_tolerance_floor": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "tolerance_n_scaling": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1
+        }
       },
       "additionalProperties": {
         "type": "object",
         "properties": {
-          "bracket": {"type": "array", "items": {"type": "number"},
-                      "minItems": 2, "maxItems": 2},
-          "loop_modules": {"type": "array", "items": {"type": "integer"}},
-          "target": {"type": "string"}
+          "bracket": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "loop_modules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "target": {
+            "type": "string"
+          }
         }
       }
     },
-
     "ground_truth": {
-      "description": "Decision A6 — the COD effect is derived, not asserted.",
+      "description": "Decision A6 \u2014 the COD effect is derived, not asserted.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["canonical_cod_effect", "gt_03", "gt_02", "gt_05", "lk_03_auc_ceiling"],
+      "required": [
+        "canonical_cod_effect",
+        "gt_03",
+        "gt_02",
+        "gt_05",
+        "lk_03_auc_ceiling"
+      ],
       "properties": {
-        "canonical_cod_effect": {"const": "average_marginal_effect"},
+        "canonical_cod_effect": {
+          "const": "average_marginal_effect"
+        },
         "gt_03": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["rule", "min_gap_closed"],
+          "required": [
+            "rule",
+            "min_gap_closed"
+          ],
           "properties": {
-            "rule": {"const": "ame_lt_adjusted_lt_naive"},
-            "min_gap_closed": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1}
+            "rule": {
+              "const": "ame_lt_adjusted_lt_naive"
+            },
+            "min_gap_closed": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "exclusiveMaximum": 1
+            }
           }
         },
         "gt_02": {
           "type": "object",
-          "required": ["rule"],
-          "properties": {"rule": {"const": "naive_gap_gt_ame"}}
+          "required": [
+            "rule"
+          ],
+          "properties": {
+            "rule": {
+              "const": "naive_gap_gt_ame_and_cal_11_passes"
+            }
+          }
         },
-        "gt_05": {"type": "object", "required": ["auc_ceiling_band", "model_within"]},
-        "lk_03_auc_ceiling": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1}
+        "gt_05": {
+          "type": "object",
+          "required": [
+            "auc_ceiling_band",
+            "model_within"
+          ]
+        },
+        "lk_03_auc_ceiling": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 1
+        }
       }
     },
-
     "leakage_guard": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["safe_feature_whitelist", "hard_blocked"],
+      "required": [
+        "safe_feature_whitelist",
+        "hard_blocked"
+      ],
       "properties": {
         "safe_feature_whitelist": {
-          "type": "array", "minItems": 1, "uniqueItems": true,
-          "items": {"type": "string"}
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
         },
         "hard_blocked": {
-          "type": "array", "minItems": 1, "uniqueItems": true,
-          "items": {"type": "string"}
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
-
     "seed": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["master", "substreams"],
+      "required": [
+        "master",
+        "substreams"
+      ],
       "properties": {
-        "master": {"type": "integer"},
+        "master": {
+          "type": "integer"
+        },
         "substreams": {
           "description": "APPEND ONLY (CLAUDE.md invariant 11). Inserting a name mid-list shifts every downstream stream and invalidates all prior runs.",
-          "type": "array", "minItems": 1, "uniqueItems": true,
-          "items": {"type": "string", "pattern": "^[a-z_]+$"}
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_]+$"
+          }
         }
       }
     },
-
     "calibration": {
       "description": "Machine-written stamp. Never hand-edit.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["dgp_sha256", "calibration_run_id", "calibrated_at_utc"],
+      "required": [
+        "dgp_sha256",
+        "calibration_run_id",
+        "calibrated_at_utc"
+      ],
       "properties": {
-        "dgp_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-        "calibration_run_id": {"type": ["string", "null"]},
-        "calibrated_at_utc": {"type": ["string", "null"]}
+        "dgp_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "calibration_run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "calibrated_at_utc": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "selection_share_gate": {
+      "description": "CAL-11 (HARD), decision A7. selection_share = (naive_gap - AME) / naive_gap. The real gate on this dataset.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lo",
+        "hi",
+        "severity"
+      ],
+      "properties": {
+        "lo": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "hi": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "severity": {
+          "const": "HARD"
+        }
+      }
+    },
+    "pre_window_cod_model": {
+      "$ref": "#/$defs/preWindowModel"
+    },
+    "pre_window_rto_model": {
+      "$ref": "#/$defs/preWindowModel"
+    },
+    "priors": {
+      "description": "Decision A19. Declared constants, never computed from generated data. LK-06 asserts the runtime value matches.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rto_prior",
+        "cod_prior",
+        "shrinkage_k"
+      ],
+      "properties": {
+        "rto_prior": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "cod_prior": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "shrinkage_k": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "missing_data": {
+      "description": "Decision A18. DO NOT IMPUTE - null plus a missing indicator.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy",
+        "indicator_column",
+        "nullable_when_no_history",
+        "never_null",
+        "logit_contribution_when_null"
+      ],
+      "properties": {
+        "policy": {
+          "const": "null_with_indicator"
+        },
+        "indicator_column": {
+          "const": "pit_has_history"
+        },
+        "nullable_when_no_history": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "never_null": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "logit_contribution_when_null": {
+          "description": "The term is switched OFF, not filled in. Must be exactly zero.",
+          "const": 0.0
+        }
       }
     }
   }

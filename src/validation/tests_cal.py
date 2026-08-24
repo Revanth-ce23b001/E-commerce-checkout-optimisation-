@@ -50,21 +50,49 @@ REASONS_BLOCK = "rto_reasons"
 FROZEN_HASH_KEY = "frozen_hash"
 IMMUTABLE_REASON_KEYS = ("base_weights", "driver_weights", "class_map")
 
-# Every model block whose slopes CAL-09 protects. Three intercepts may be solved
-# (decision A2 admits conversion_model_alpha0, which spec §9.1 already lists in
-# calibrated_intercepts); ZERO slopes may move, in any of the three.
-MODEL_BLOCKS = ("cod_model", "rto_model", "conversion_model")
+# Every model block whose slopes CAL-09 protects. FIVE intercepts may now be
+# solved -- cod, rto, conversion, pre_window_cod, pre_window_rto (decisions A2
+# and A11). All five are LEVELS. ZERO slopes may move, in any block.
+#
+# The two pre-window blocks declare NO coefficients of their own: decision A11
+# re-uses the already-approved cod_model / rto_model latent slopes. The
+# pre-window generators therefore record those slopes into the PARENT block, so
+# the ledger's duplicate-value check enforces that pre-window and in-window
+# behaviour share one value per coefficient. That shared structure is what makes
+# prior RTO predict future RTO (H3 / BR-02) and prior COD predict future COD
+# (BR-03); if the two ever diverged, the ledger would raise before any data
+# reached validation.
+MODEL_BLOCKS = (
+    "cod_model",
+    "rto_model",
+    "conversion_model",
+    "pre_window_cod_model",
+    "pre_window_rto_model",
+)
 
 
 def cal_09_no_slope_changed(
     ledger: CoefficientLedger,
     params: Any,
     model_blocks: tuple[str, ...] = MODEL_BLOCKS,
+    *,
+    require_complete_coverage: bool = True,
 ) -> TestResult:
     """CAL-09 (HARD) — no slope coefficient differs from params.yaml.
 
     Compares every coefficient the generator actually used against the declared value.
     Intercepts are excluded: they are the values the calibrator is permitted to solve.
+
+    The test has two arms, and they are not equally valid at all times:
+
+    * **A value mismatch, or a coefficient used but not declared.** Always fatal.
+      Either the generator overrode params.yaml, or a business literal leaked into
+      ``src/``.
+    * **A coefficient declared but never used.** Fatal only on a COMPLETE run. Set
+      ``require_complete_coverage=False`` at a mid-pipeline checkpoint, where most
+      coefficients legitimately have not been consumed yet — modules 08 onward
+      simply have not run. Reporting those as failures at a checkpoint would train
+      the reader to ignore a HARD test, which is worse than not running it.
 
     Parameters
     ----------
@@ -110,12 +138,19 @@ def cal_09_no_slope_changed(
             + ", ".join(sorted(undeclared))
             + " — a business value has leaked into src/"
         )
-    if unused:
+    if unused and require_complete_coverage:
         problems.append(
             f"{len(unused)} coefficient(s) declared but never used: "
             + ", ".join(sorted(unused))
             + " — a planted relationship is silently absent from the data"
         )
+
+    coverage = (
+        f"{checked} slope(s) verified across {len(model_blocks)} block(s)"
+        if require_complete_coverage
+        else f"{checked} slope(s) verified across {len(model_blocks)} block(s); "
+             f"{len(unused)} not yet consumed (partial run)"
+    )
 
     return TestResult(
         test_id="CAL-09",
@@ -123,7 +158,7 @@ def cal_09_no_slope_changed(
         severity=Severity.HARD,
         status=Status.PASS if not problems else Status.FAIL,
         expected="exact match on every slope (tolerance 0)",
-        actual=f"{checked} slope(s) verified across {len(model_blocks)} block(s)",
+        actual=coverage,
         delta="0 mismatches" if not problems else f"{len(mismatches)} mismatch(es)",
         detail=" | ".join(problems),
     )
@@ -191,6 +226,78 @@ def cal_10_reason_weights_frozen(params: Any) -> TestResult:
                 "RTO reason base weights, driver weights or class map changed after "
                 "approval. If CAL-08 failed, report it as a finding — do not tune "
                 "these weights."
+            )
+        ),
+    )
+
+
+def cal_11_selection_share(
+    naive_gap_pp: float,
+    average_marginal_effect_pp: float,
+    params: Any,
+) -> TestResult:
+    """CAL-11 (HARD) — the selection share of the naive COD-RTO gap.
+
+    ``selection_share = (naive_gap - AME) / naive_gap``
+
+    Decision A7 made this the real gate on the dataset. The entire analytical
+    payoff of the project is the claim that a naive crosstab overstates the causal
+    effect of COD by roughly a third. If the selection share lands at 8% the
+    confounding is too weak to be worth analysing; if it lands at 60% the planted
+    ``is_cod`` coefficient is barely doing anything and the "COD causes RTO" story
+    is not what the data contains. **Either way the dataset fails to support the
+    case study — regardless of whether the RTO rate levels hit their targets.**
+
+    This is HARD precisely where CAL-03 and CAL-04 no longer are. Those measure
+    *levels*, which only one knob steers; this measures the *structure*, which is
+    what the project is actually about.
+
+    Note the direction of the fix if this fails: the answer is never to move a
+    slope. The selection share is a consequence of the fixed ``is_cod = +1.60``
+    against the latent structure in the COD model. A miss means the Phase 1
+    assumption set does not produce the claimed one-third — a finding to escalate
+    (CLAUDE.md rule 3), not a bug to tune away.
+    """
+    gate = params.get("selection_share_gate")
+    lo, hi = float(gate["lo"]), float(gate["hi"])
+
+    if naive_gap_pp <= 0:
+        return TestResult(
+            test_id="CAL-11",
+            name="Selection share of the naive COD-RTO gap",
+            severity=Severity.HARD,
+            status=Status.FAIL,
+            expected=f"selection share in [{lo:.2f}, {hi:.2f}]",
+            actual=f"naive gap is {naive_gap_pp:.2f}pp",
+            detail=(
+                "The naive COD-prepaid gap is not positive, so the selection share is "
+                "undefined. COD orders are not RTO-ing more often than prepaid ones at "
+                "all — the planted structure did not materialise."
+            ),
+        )
+
+    share = (naive_gap_pp - average_marginal_effect_pp) / naive_gap_pp
+    passed = lo <= share <= hi
+
+    return TestResult(
+        test_id="CAL-11",
+        name="Selection share of the naive COD-RTO gap",
+        severity=Severity.HARD,
+        status=Status.PASS if passed else Status.FAIL,
+        expected=f"[{lo:.2f}, {hi:.2f}]",
+        actual=f"{share:.3f}",
+        delta=(
+            f"naive {naive_gap_pp:.2f}pp - AME {average_marginal_effect_pp:.2f}pp "
+            f"= {naive_gap_pp - average_marginal_effect_pp:.2f}pp of selection"
+        ),
+        detail=(
+            ""
+            if passed
+            else (
+                "The dataset no longer supports the case study. Do NOT adjust a slope: "
+                "the selection share is emergent from the fixed is_cod = +1.60 against "
+                "the COD model's latent structure. Escalate as a finding about the "
+                "Phase 1 assumption set."
             )
         ),
     )

@@ -10,8 +10,15 @@ A dataset where the obvious analysis produces the obvious right answer is a fail
 
 ## Status
 
-**Phase 2B, Stage 2 (foundation) — in progress.**
-No dataset has been generated. See `docs/decision_register.md` for open decisions.
+**Phase 2B — Stage 2 complete; generation modules 02–07 built and checkpointed.**
+
+Dimensions, latents and pre-window customer history exist and pass their checkpoint: both
+pre-window intercepts converge, and all seven latent → history correlation signs match the
+planted coefficients. Modules 08–23 (sessions onward) are not started, and no full dataset
+has been generated.
+
+Open: **A27** — the distribution values modules 02–07 need are written into `params.yaml`
+tagged `[A27 PROPOSED]` and are **not yet approved**. See `docs/decision_register.md`.
 
 ## Source of truth
 
@@ -49,6 +56,34 @@ make load        # load PostgreSQL, create views, apply REVOKE
 make test        # pytest — unit tests for generator code
 make all         # generate -> validate -> load
 ```
+
+### Without `make`
+
+`make` is not required. Every target is a thin wrapper around a script, and the underlying
+invocation is always available:
+
+| Make target | Direct equivalent |
+|---|---|
+| `make test` | `.venv/Scripts/python.exe -m pytest` |
+| `make dev` | `.venv/Scripts/python.exe scripts/01_generate.py --dev` |
+| `make generate` | `.venv/Scripts/python.exe scripts/01_generate.py` |
+| `make load` | `.venv/Scripts/python.exe scripts/02_load_postgres.py --force` |
+| — | `.venv/Scripts/python.exe scripts/02_load_postgres.py --dry-run` |
+
+On macOS/Linux the interpreter is `.venv/bin/python`.
+
+```bash
+# Useful flags
+python scripts/01_generate.py --no-write      # run the checkpoint, write nothing
+python scripts/01_generate.py --seed 7        # override seed.master for a robustness check
+python scripts/02_load_postgres.py --dry-run  # parse the DDL, no server needed
+```
+
+`--dry-run` parses every statement in `sql/*.sql` against the postgres dialect and reports
+failures with the offending statement. It catches structural errors at zero cost. It does
+**not** catch semantic ones — a missing referenced table, a duplicate constraint name, a
+cross-table type mismatch — and it cannot verify the REVOKE grants, which is LK-05 and needs
+a live server. A clean dry-run means "this will parse", not "this will apply".
 
 ## Key invariants
 

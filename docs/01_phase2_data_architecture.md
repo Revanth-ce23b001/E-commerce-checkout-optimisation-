@@ -635,7 +635,7 @@ Note what this view does **not** select: no `dim_customer.hist_*`, no delivery e
                            │
 18 │  dim_customer roll-up ── hist_*_final, clv_estimate, analytics_segment
                            │
-19 │  validation harness   ── 42 tests → PASS/FAIL report
+19 │  validation harness   ── 62 tests → PASS/FAIL report
 ```
 
 ### 5.2 Why each dependency is non-negotiable
@@ -1477,7 +1477,11 @@ RNG["rto"].binomial(...)
 
 ## 17. VALIDATION FRAMEWORK
 
-42 tests in seven families. **HARD** failures block the dataset. **SOFT** failures are logged and require written sign-off.
+**62 tests** in seven families: VOL (4) · CAL (11) · EC (7) · BR (11) · LK (6) · DQ (16) · GT (7).
+
+**HARD** failures block the dataset. **SOFT** failures are logged and require written sign-off.
+
+> **Count corrected.** This section previously said "42", which the family counts never summed to. The count then moved on the rulings: **+CAL-10** (reason-weight immutability, A4) · **+CAL-11** (selection share, A7) · **+LK-06** (declared shrinkage prior, A19) · **DQ-07 split into 07a / 07b / 07c** (A9). CAL-03/04 were downgraded HARD → SOFT (A7) but are still counted. See `docs/decision_register.md` A17.
 
 ### VOL — Volume (4 tests)
 
@@ -1689,7 +1693,7 @@ checkout-rto-optimization/
 | 10 | Economics generation model | §12 | ✅ Every cost line + reconciliation to Phase 1 |
 | 11 | Parameter registry | §13 | ✅ Full `params.yaml` skeleton |
 | 12 | Generation order | §14 | ✅ 23 modules with blocking dependencies |
-| 13 | Validation framework | §17–18 | ✅ 42 tests, 7 families, PASS/FAIL rule |
+| 13 | Validation framework | §17–18 | ✅ 62 tests, 7 families, PASS/FAIL rule |
 | 14 | Claude Code folder architecture | §19 | ✅ |
 | 15 | Implementation checklist | §20.1 | ✅ below |
 
@@ -1712,7 +1716,7 @@ checkout-rto-optimization/
 
 **Load and validate**
 - [ ] Load PostgreSQL; create views; **REVOKE all on schema `truth` from `analyst`**
-- [ ] Run all 42 tests; generate the §18 report
+- [ ] Run all 62 tests; generate the §18 report
 - [ ] Run the 5-seed robustness check; record the spread on every calibration target
 - [ ] Run the four sensitivity scenarios; confirm the exposure band from Phase 1 §7.3 reproduces
 

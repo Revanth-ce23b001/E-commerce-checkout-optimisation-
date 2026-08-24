@@ -15,9 +15,9 @@ The rulings issued on 2026-08-24 labelled the censoring decision **A11**. In thi
 register censoring is **A10**; **A11** is the latent → pre-window history
 parametrisation, which is a different and still-unruled question.
 
-The ruling has been applied to **A10 (censoring)**, which is what it describes. The
-outstanding load-bearing items are therefore **A7, A9 and A11** — not A7/A9/A10.
-A11 is restated below alongside A7 and A9 for ruling.
+The ruling was applied to **A10 (censoring)**, which is what it describes. The
+correction was accepted on 2026-08-24 and this register's numbering is now canonical.
+A7, A9 and A11 were then restated and have all been ruled.
 
 ---
 
@@ -77,10 +77,11 @@ meaningful.
 
 **Applied.** `conversion_model` block written to `config/params.yaml`.
 
-**CAL-09 extended.** `MODEL_BLOCKS = ("cod_model", "rto_model", "conversion_model")` in
-`src/validation/tests_cal.py`. **Three intercepts may be solved; zero slopes may move.**
-CLAUDE.md rule 1 says "only two numbers may be calibrated" — that count is now **three**
-and CLAUDE.md needs the one-line amendment. Flagged, not edited: it is the guardrail file.
+**CAL-09 extended.** Now **five** blocks, once A11 added the two pre-window models:
+`cod_model` · `rto_model` · `conversion_model` · `pre_window_cod_model` ·
+`pre_window_rto_model`. **Five intercepts may be solved; zero slopes may move.**
+CLAUDE.md rule 1 was amended accordingly (approved 2026-08-24) and now states the
+principle rather than a count, so adding a model block does not require re-editing it.
 
 **Sequencing recorded.** Payment-failure abandonment (module 11) is generated **before**
 this model runs. The conversion model governs address-step and payment-page abandonment
@@ -285,80 +286,98 @@ stays at 17 entries — nothing appended, so every existing stream is untouched.
 
 ---
 
-## Pending — these block Stage 3
 
-> **Restated below for ruling, as requested.** A7 and A9 as they stood; **A11** in place of
-> A10, which has now been ruled.
+### A7 - Three HARD RTO targets, one knob · **RULED 2026-08-24 · APPROVED**
 
-### A7 — Three HARD RTO targets, one knob · PENDING
+**Logged as instructed: a specification inconsistency — three HARD targets against one
+degree of freedom.** CAL-03, CAL-04 and CAL-05 cannot all be HARD when γ₀ is the only free
+parameter, because moving γ₀ shifts all three rates together and the COD/prepaid *split* is
+not tunable at all.
 
-CAL-03 (COD RTO 24.0% ±1.5pp), CAL-04 (prepaid RTO 4.1% ±0.8pp) and CAL-05 (blended 16.5%
-±1.0pp) are all HARD, but the calibrator has exactly **one** free parameter, γ₀. It cannot
-independently steer three quantities. The COD/prepaid *split* is not tunable at all: it is
-emergent from the fixed `is_cod = +1.60` plus whatever selection the COD model produces.
-Moving γ₀ shifts all three rates in the same direction together, so if the emergent gap is
-not ≈19.9pp, no value of γ₀ satisfies CAL-03 and CAL-04 simultaneously — and CAL-05 is not
-independent, being roughly `0.62 × CAL-03 + 0.38 × CAL-04`. This item now also carries GT-02's
-band problem: its `[18.5, 21.5]`pp naive-gap band is *narrower* than the CAL-03/CAL-04
-tolerances jointly permit (those tolerances admit a gap anywhere in roughly
-`[16.6, 21.4]`pp), so a dataset can pass both HARD calibration tests and still fail GT-02
-through no fault of its own.
+**Ruling — five parts, all applied.**
 
-**Recommended option.** Calibrate γ₀ against **CAL-05 (blended)** alone — it is the one
-target that is a true function of γ₀ — then **report** CAL-03 and CAL-04 as emergent
-outcomes. If either misses its tolerance, that is a finding about the Phase 1 assumption set
-(the +1.60 coefficient and the selection structure cannot jointly produce a 19.9pp gap at the
-required levels), escalated per CLAUDE.md rule 3 — **not** repaired by moving a slope. In
-parallel, widen GT-02's band to `[16.5, 21.5]`pp so it is consistent with the tolerances
-CAL-03/04 already grant.
+1. **CAL-05 (blended 16.5% ±1.0pp) stays HARD.** It is the one target that is a true
+   function of γ₀. The calibrator solves against it alone.
+2. **CAL-03 and CAL-04 downgraded to SOFT, widened to ±2.5pp**, and marked
+   `emergent: true` in `params.yaml` so nobody later mistakes them for inputs. The
+   validation report must label them **EMERGENT, NOT CALIBRATED**.
+3. **No second knob.** Widening the gap would require moving latent slopes in the RTO
+   model, which CAL-09 forbids. The gap is what the fixed `is_cod = +1.60` plus selection
+   produces. That is the honest answer.
+4. **CAL-11 (HARD) — the new gate, and the real one.**
 
-### A9 — DQ-07's reconciliation invariant is unsatisfiable · PENDING
+   ```
+   selection_share = (naive_gap - AME) / naive_gap
+   PASS if selection_share in [0.25, 0.45]
+   ```
 
-DQ-07 (HARD) asserts that for every customer, the **last** session's `pit_*` values plus that
-session's outcome equal `dim_customer.hist_*_final`. Two independent things break it. First,
-**unresolved intermediate orders**: `pit_*` counts only orders whose outcome had *resolved*
-before the session timestamp, but `hist_*_final` counts every order in the window. A customer
-whose second-to-last order is still in transit at their last session is missing from the
-`pit_*` side and present on the `hist_*` side, so the identity fails by construction — and
-with outcomes taking 4–25 days this is common, not rare. Second, **A10 censoring** makes it
-strictly worse: a censored order has `rto_flag = NULL`, so it can be counted in neither an
-RTO numerator nor a delivered count, yet it is a real order.
+   The entire analytical payoff is "naive analysis overstates the COD effect by roughly a
+   third". At 8% the confounding is too weak to analyse; at 60% the planted coefficient is
+   barely doing anything. **Either way the dataset fails to support the case study,
+   regardless of whether the rate levels hit their targets.** HARD precisely where CAL-03/04
+   no longer are: those measure *levels*, which one knob steers; this measures *structure*,
+   which is what the project is about.
+5. **GT-02 reformulated relatively:** `PASS if naive_gap > AME AND CAL-11 passes`. The
+   absolute `[18.5, 21.5]`pp band is **dropped entirely**, not swapped for another
+   hard-coded number.
 
-**Recommended option.** Restate DQ-07 as a **resolved-only** reconciliation:
-`last_session_pit_* + (that session's outcome, if resolved) = hist_*_final` computed over
-**resolved, uncensored orders only**, and keep it HARD in that form. Separately add a SOFT
-companion check that the count of orders excluded for non-resolution or censoring is
-non-zero and matches the censoring model — turning what is currently a broken invariant into
-two tests that each assert something true. The alternative — dropping DQ-07 to SOFT — loses
-the only end-to-end check that the point-in-time logic is right, so it is not recommended.
+**Applied.** `calibration_targets` severities and tolerances · `selection_share_gate` block ·
+`ground_truth.gt_02.rule` · `calibration_search.rto_model.target` · `cal_11_selection_share`
+in `src/validation/tests_cal.py`, with tests covering the pass case and both failure
+directions.
 
-### A11 — No latent → pre-window history parametrisation · PENDING
+---
 
-Brief §9.5 and spec §14 module 07 both require that pre-window history be generated **FROM
-the latents** — "this is what creates the confounding" — but neither document states *how*.
-There is no parametrisation anywhere linking `latent_trust`, `latent_liquidity`,
-`latent_intent` or `latent_price_sensitivity` to `pre_window_orders`,
-`pre_window_cod_orders`, `pre_window_rto_count`, `pre_window_prepaid_success` or
-`pre_window_payment_failures`. This is load-bearing in a way that is easy to miss: those five
-columns seed `pit_cod_share` (COD coefficient **+2.20**, the strongest observable) and
-`pit_rto_rate_shrunk` (RTO coefficient **+2.80**, the strongest observable). If history is
-drawn independently of the latents, those two features become noise, the confounding never
-forms, H3 and BR-02/BR-03 have nothing to detect, and the naive-vs-adjusted gap that this
-entire project exists to produce collapses toward zero.
+### A9 - DQ-07 reconciliation invariant · **RULED 2026-08-24 · APPROVED**
 
-**Recommended option.** A minimal, explicitly-declared linkage: draw `pre_window_orders` from
-the existing zero-inflated negative binomial but shift its mean on `latent_intent` and
-`latent_trust`; then draw each prior order's COD flag from a logit using **the same COD
-slopes already in `params.yaml`** (latents only, no point-in-time terms, since none exist
-pre-window), and each prior order's RTO flag from a logit using the same RTO latent slopes
-plus `is_cod`. Re-using the approved coefficients rather than inventing a second set means
-**no new business assumptions** — only the two pre-window intercepts would be new, and both
-can be pinned to the same 62% / 16.5% population targets rather than freely chosen. The
-alternative — a fresh 10–15 coefficient history model — adds a large block of C-class
-invented parameters to a module nobody will ever inspect.
+Diagnosis accepted, but end-to-end coverage of the point-in-time logic is not given up.
+**Split into three rather than dropped to SOFT.**
 
-`config/params.yaml` carries `latent_to_history: null` deliberately. Module 07 is **blocked**.
-A placeholder value there would be exactly the unflagged assumption CLAUDE.md forbids.
+| Test | Severity | Assertion |
+|---|---|---|
+| **DQ-07a** | HARD | Resolved-only reconciliation. Last-session `pit_*` counts + outcomes of all orders resolved between that session and window end = `hist_*_final` **restricted to resolved orders**. |
+| **DQ-07b** | HARD | **Full ledger identity.** `COUNT(fct_order WHERE customer_id = c) + pre_window_orders = hist_orders_final`, for every customer, no exceptions. Independent of resolution state — which is exactly why it is satisfiable where the original was not. |
+| **DQ-07c** | SOFT | Excluded count is non-zero and equals the count of orders with `outcome_resolved_date > window_end` OR `is_censored = TRUE`. Asserts the exclusion is explained by the censoring model rather than by a bug. |
+
+DQ-07b is the part that recovers most of what the original was reaching for: a genuine
+end-to-end check that no order was dropped or double-counted anywhere in the pipeline, and it
+holds regardless of what resolved when.
+
+**Status.** Ruled and specified. Implementation waits for the tables these read (modules
+13-20), like every other data-level test.
+
+---
+
+### A11 - Latent to pre-window history · **RULED 2026-08-24 · APPROVED · IMPLEMENTED**
+
+Approved exactly as proposed: **re-use the existing COD and RTO latent slopes, add only
+pre-window intercepts. No new business assumptions.**
+
+| Quantity | Rule |
+|---|---|
+| `pre_window_orders` | Neg-binomial per `distributions.pre_window_orders`, capped by `tenure_days`. **NOT latent-driven** — order frequency is in no Phase 1 hypothesis. |
+| `pre_window_cod_orders` | Per prior order: `logit = pi_cod0 + latent_trust(-0.55) + latent_liquidity(-0.45) + latent_intent(+0.40) + latent_price_sensitivity(+0.12) + geo_tier[tier]`. Calibrated to 62% ±2pp (SOFT). |
+| `pre_window_rto_count` | Per prior order: `logit = pi_rto0 + is_cod(+1.60) + latent_intent(+0.70) + latent_liquidity(-0.55) + latent_trust(-0.30) + geo_tier[tier]`. Calibrated to 16.5% ±2pp (SOFT). |
+| `pre_window_delivered` | `orders - rto_count - preship_cancels` |
+| `pre_window_prepaid_success` / `_payment_failures` | Derived from the prepaid subset using `payment_failure.*`. No new coefficients. |
+
+**Why this must not be shortcut.** Pre-window and in-window behaviour now share the same
+latent slopes, which is precisely why prior RTO predicts future RTO (H3 / BR-02) and prior
+COD predicts future COD (BR-03). Break it and the confounding becomes noise.
+
+**Enforcement, not just intention.** The re-used slopes are recorded into the **parent**
+ledger block (`cod_model` / `rto_model`), so the `CoefficientLedger` duplicate-value check
+makes a pre-window/in-window divergence impossible — it raises at generation time, long
+before validation. `pre_window_cod_model.coefficients` and `pre_window_rto_model.coefficients`
+are schema-constrained to stay **empty**, so a second divergent copy of a slope cannot be
+added by hand either.
+
+**Five calibrated intercepts now.** cod · rto · conversion · pre_window_cod · pre_window_rto.
+All are LEVELS. Zero slopes move. CAL-09 extended to all five blocks.
+
+**Implemented and verified.** `src/generators/history.py`; both intercepts converge; all
+seven latent-to-history correlation signs match the planted coefficients. See the Stage-2
+checkpoint in the build status below.
 
 ---
 
@@ -482,73 +501,136 @@ individually as its module is reached. Recording this rather than quietly closin
 
 ---
 
-## New — raised while applying the rulings
+## New - raised while applying the rulings
 
-### A25 — `abandon_step` allocation rule is unspecified · OPEN
+### A25 - `abandon_step` attribution · **RULED 2026-08-24 · APPROVED**
 
-The A2 conversion model yields **one** probability and therefore **one** Bernoulli draw, but
-`abandon_step` has four values (ADDRESS / PAYMENT_PAGE / PAYMENT_FAILURE / FEE_REVEAL). Module
-11 supplies PAYMENT_FAILURE. Nothing states how the remaining three are assigned, and the
-brief requires `abandon_step` to be *causally connected* to what happened rather than drawn
-from a table.
+Deterministic, largest-negative-contribution, with a fixed precedence that overrides it.
+Evaluated top to bottom; first match wins:
 
-**Recommended option — a deterministic attribution rule, no new randomness and no new
-parameters.** On an abandoned session, attribute the step to the term that contributed the
-largest negative amount to the conversion logit: `shipping_fee_charged_gt0` → **FEE_REVEAL**;
-`address_completeness` → **ADDRESS**; otherwise → **PAYMENT_PAGE**. `address_completed` and
-`payment_page_reached` then follow deterministically. This reuses the seven approved slopes
-and invents nothing, but it *is* a rule the spec does not contain, so it is raised rather than
-resolved.
+| Order | Step | Rule |
+|---|---|---|
+| 1 | `PAYMENT_FAILURE` | Set by module 11c. **Immutable, always wins.** |
+| 2 | `FEE_REVEAL` | `shipping_fee_charged > 0` **and** it is the largest negative contributor |
+| 3 | `PAYMENT_PAGE` | Otherwise, if abandonment occurred at or after that step |
+| 4 | `ADDRESS` | Otherwise |
 
-### A26 — Conversion/payment sequencing produces an impossible session · OPEN — **blocks module 12**
+No new randomness and no new coefficient. **Applied** to
+`conversion_model.abandon_step_precedence`. Outstanding: document the rule in
+`docs/data_generating_process.md` when that file is written.
 
-Spec §14 runs module 11 (payment attempts) **before** module 12 (conversion), and the A2
-ruling confirms that order. But the conversion model can then draw ADDRESS-step abandonment
-for a session that has **already completed a successful payment attempt** — a session that
-paid and then abandoned at the address step. The DDL's `ses_funnel_monotone` constraint
-rejects such a row, correctly.
+---
 
-**Options.**
-- **(a) Split the hurdle.** Evaluate the conversion logit's address hurdle as module 11a,
-  *before* payment attempts, and the payment-page/fee-reveal hurdle after. Preserves both
-  "failure causes abandonment" and funnel coherence. Cost: one logit, two thresholds — needs
-  a splitting rule the spec does not give.
-- **(b) Condition the draw.** Keep the single draw at module 12 but restrict the abandon-step
-  label to be consistent with the realised payment path: a session with a successful payment
-  attempt can only abandon at PAYMENT_PAGE/FEE_REVEAL, never ADDRESS. Cheapest; slightly odd
-  semantics (paid, then abandoned).
-- **(c) Reorder.** Run conversion before payment attempts. Rejected — it breaks the
-  failure-causes-abandonment dependency that CLAUDE.md's generation order calls non-negotiable
-  and that makes H11 answerable.
+### A26 - Impossible session state · **RULED 2026-08-24 · APPROVED**
 
-**Recommendation: (a).** It is the only option that leaves both invariants intact. Ruling
-needed before module 12 is written; it does not block modules 02–11.
+Approved: split the address hurdle out to run **before** payment attempts.
+
+| Module | Step |
+|---|---|
+| **11a** | address-step abandonment draw |
+| **11b** | payment-page-reach / fee-reveal abandonment draw |
+| **11c** | payment attempts — only sessions reaching the payment page **and** intending prepaid |
+| **12** | assemble final conversion state + `abandon_step` |
+
+`ses_funnel_monotone` **stays** in the DDL. Under this ordering it should now be
+*unreachable* rather than merely unviolated — which is the stronger property: the constraint
+becomes a proof that the ordering is right, not a net catching a bug.
+
+**Applied** to `conversion_model.hurdle_order` and `calibration_search.*.loop_modules`.
+Outstanding: the generation-order tables in `docs/` when modules 08+ are written.
+
+---
+
+### A27 - Distributions the spec requires but never quantified · **OPEN — needs sign-off**
+
+Modules 02-07 could not run without these, and they are almost certainly what the
+never-recorded "A24 — 13 distributional/structural gaps" was pointing at. They are written
+into `params.yaml` under `distributions.*`, each tagged **`[A27 PROPOSED]`**, rather than
+buried as literals in `src/`.
+
+| Block | What it sets | Why this value |
+|---|---|---|
+| `demand` | Weekday multipliers, month-end x1.08, salary-week x1.06, 4% noise | Spec says "weekly seasonality + month-end" with no magnitudes. Weekend-heavy, mild salary-cycle lift. |
+| `geography` | Serviceability / courier reliability / delivery days / `cod_cultural_index` by tier | Serviceability falls monotonically with tier (access). **`cod_cultural_index` deliberately does not** — Tier-1 peaks, Metro is lowest — so norms stay a separate channel from access (spec 3.2). |
+| `seller` | Tenure, rating count, SLA breach (mean ~0.083), cancellation (~0.021), tier thresholds | Both means match the spec worked examples. Tier requires clearing **both** the rating and SLA bar, so it cannot become a rating alias. |
+| `product` | Base discount (mean ~0.082), returnability and weight band by category | Discount mean matches `economics.platform_discount_pct = 0.080`. Grocery returnability is low (0.35) because perishables mostly are not returnable. |
+| `customer` | Tenure, age, channel, saved-instrument model | The saved-instrument rate rises with trust and liquidity rather than being flat, because customers who lack an instrument are exactly the ones a prepaid-shift intervention would target — that is the H7 ceiling. |
+| `pre_window` | `min_days_between_orders: 21`; `model_switch_to_cod: false` | The cap enforces the brief 9.5 tenure constraint. Switch-COD is **not** modelled pre-window: it is a live in-session behaviour, and faking it would inflate CAL-07 with orders that never had a session. |
+
+**Why proceeding on these is contained rather than reckless:** none of them feeds a
+calibration target or a planted causal coefficient. They shape realism — names, tiers,
+ratings, volume seasonality — not the relationships the project measures. The one with real
+downstream reach is `geography.cod_cultural_index`, because it enters the COD logit at +0.30;
+its tier ordering is the load-bearing choice there and is flagged above.
+
+**They still need sign-off.** Requesting a ruling.
 
 ---
 
 ## Build status
 
-**Stage 2 (foundation) — config and schema complete. Generators still blocked.**
+**Stage 2 complete. Modules 02-07 built and checkpointed. Modules 08+ not started.**
 
 | Component | Status |
 |---|---|
 | Dependency verification on Python 3.14 | ✅ All 11 packages import cleanly |
 | Repo hygiene, `docs/` canonical paths, `.gitignore` | ✅ |
 | Project skeleton, `pyproject.toml`, `Makefile` | ✅ |
-| Seed substream harness + independence checkpoint | ✅ 17 tests |
+| Seed substream harness + independence checkpoint | ✅ |
 | Config loader (schema-validate, SHA-256, DGP-hash guard) | ✅ |
-| Logit assembler + coefficient ledger | ✅ 24 tests |
-| CAL-09 (slope immutability) — **now covers 3 model blocks** | ✅ |
-| CAL-10 (reason-weight immutability) | ✅ **ACTIVE and PASSING** — hash frozen |
-| Shrinkage helper | ✅ 15 tests |
-| **`config/params.yaml`** | ✅ **written and schema-validated** |
-| **`config/params.schema.json`** | ✅ written |
-| **`sql/00_schema_analytics.sql`** (12 tables) | ✅ written — ⚠️ not executed, no PostgreSQL available |
-| **`sql/01_schema_truth.sql`** (2 tables + REVOKE) | ✅ written — ⚠️ not executed |
-| `latent_to_history` parametrisation | ⛔ **A11 — module 07 blocked** |
-| Generators, calibration, any data | ⛔ Blocked on A7, A9, A11 (+ A26 for module 12) |
+| Logit assembler + coefficient ledger | ✅ |
+| Shrinkage helper | ✅ |
+| `config/params.yaml` + `params.schema.json` | ✅ all rulings applied, schema-validated |
+| `config/scenarios/dev_small.yaml` | ✅ scale only — not one coefficient changed |
+| `sql/00_schema_analytics.sql` (12 tables) | ✅ parses clean — ⚠️ never executed, no PostgreSQL |
+| `sql/01_schema_truth.sql` (2 tables + REVOKE) | ✅ parses clean — ⚠️ never executed |
+| DDL dry-run (`scripts/02_load_postgres.py --dry-run`) | ✅ 34/34 statements parse |
+| **CAL-09** slope immutability — five blocks | ✅ |
+| **CAL-10** reason-weight immutability | ✅ ACTIVE, hash frozen at `35774eca…` |
+| **CAL-11** selection-share gate (A7) | ✅ implemented + tested both directions |
+| **LK-06** declared shrinkage prior (A19) | ✅ implemented + tested both directions |
+| **DQ-07a / 07b / 07c** (A9) | 📋 specified; implementation waits for modules 13-20 |
+| **02** `dim_date` | ✅ |
+| **03** `dim_geography` | ✅ |
+| **04** `dim_seller` | ✅ |
+| **05** `dim_product` | ✅ |
+| **06** `dim_customer` + `truth_customer_latent` | ✅ |
+| **07** pre-window history + 2 calibrators | ✅ both converged |
+| Modules 08-23 | ⬜ not started |
 
-**56 unit tests, all passing. No dataset generated.**
+**110 unit tests, all passing. No full dataset generated.**
 
-**Remaining blockers before generator work starts:** A7 · A9 · A11. A26 blocks module 12
-only, and can be ruled later without holding up modules 02–11.
+### Stage-2 checkpoint result (full scale, seed 20260115)
+
+| Measure | Value |
+|---|---|
+| Pre-window orders drawn | 122,647 across 55,000 customers |
+| `pi_cod0` solved | **+0.5156** → COD share **0.6166** (target 0.620 ±0.020) ✅ |
+| `pi_rto0` solved | **−3.3750** → RTO rate **0.1671** (target 0.165 ±0.020) ✅ |
+| Pre-ship cancel rate | 0.0395 |
+| Customers with no pre-window history | **38.9%** |
+
+**Latent → history correlations — all seven signs match the planted coefficients:**
+
+| Latent | vs pre-window COD rate | vs pre-window RTO rate |
+|---|---:|---:|
+| `latent_trust` | −0.377 ✅ | −0.256 ✅ |
+| `latent_liquidity` | −0.430 ✅ | −0.384 ✅ |
+| `latent_intent` | **+0.294** ✅ | **+0.359** ✅ |
+| `latent_price_sensitivity` | +0.133 ✅ | — |
+
+`latent_intent` correlating positively with **both** is the confounding this project
+depends on. Prior COD and prior RTO also correlate positively with each other, which is
+what makes BR-02 and BR-03 detectable later.
+
+All brief §9.5 consistency constraints pass with zero violations.
+
+### Open items
+
+| # | Item | Blocks |
+|---|---|---|
+| **A27** | Distribution values for modules 02-07, tagged `[A27 PROPOSED]` | Nothing today — but they are **unapproved** and the data already depends on them |
+| A25 / A26 | Ruled; docs still need the generation-order tables updated | Modules 08+ documentation |
+| A24 | Container item; its 13 sub-items were never recorded | Superseded in practice by A27 |
+
+**Awaiting a ruling on A27 before this data is treated as anything but provisional.**

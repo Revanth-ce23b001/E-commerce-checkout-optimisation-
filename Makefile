@@ -6,16 +6,20 @@ ifeq ($(OS),)
 PY := .venv/bin/python
 endif
 
-.PHONY: help setup test dev generate validate load all clean
+.PHONY: help setup test dev generate dryrun validate load all clean
+
+# Every target below is a thin wrapper. README documents the direct `python
+# scripts/...` invocation for each, so nothing is blocked on having make installed.
 
 help:
 	@echo "make setup     - create .venv and install the pinned stack"
 	@echo "make test      - pytest: unit tests for GENERATOR CODE"
-	@echo "make dev       - generate the 5,000-order development dataset  [BLOCKED]"
-	@echo "make generate  - generate the full 100K+ dataset               [BLOCKED]"
-	@echo "make validate  - run the validation suite                      [BLOCKED]"
-	@echo "make load      - load PostgreSQL, create views, apply REVOKE   [BLOCKED]"
-	@echo "make all       - generate -> validate -> load                  [BLOCKED]"
+	@echo "make dev       - modules 02-07 at 5,000-order dev scale"
+	@echo "make generate  - modules 02-07 at full scale  [08+ NOT BUILT]"
+	@echo "make dryrun    - parse sql/*.sql with sqlglot; no server needed"
+	@echo "make validate  - run the validation suite     [BLOCKED]"
+	@echo "make load      - load PostgreSQL + REVOKE     [BLOCKED]"
+	@echo "make all       - generate -> validate -> load [BLOCKED]"
 
 setup:
 	python -m venv .venv
@@ -25,23 +29,28 @@ setup:
 test:
 	$(PY) -m pytest
 
-# --- gated targets ---------------------------------------------------------
-# config/params.yaml, params.schema.json and both SQL schema files are written.
-# A2, A4, A6, A8, A10, A12 and A13-A24 are ruled. Stage 3 remains blocked on the
-# three load-bearing decisions below. See docs/decision_register.md.
-
-BLOCKED = @echo "BLOCKED: generator work is gated on three open decisions." && \
-	echo "  A7  - three HARD RTO targets (CAL-03/04/05), one knob (gamma_0)" && \
-	echo "  A9  - DQ-07 reconciliation invariant is unsatisfiable as written" && \
-	echo "  A11 - no latent -> pre-window history parametrisation (blocks module 07)" && \
-	echo "Also A26 (conversion/payment sequencing) before module 12." && \
-	echo "See docs/decision_register.md." && exit 1
+# --- built -----------------------------------------------------------------
+# Modules 02-07 only: dates, geography, sellers, products, customers + latents,
+# pre-window history. Ends with the Stage-2 checkpoint.
 
 dev:
-	$(BLOCKED)
+	$(PY) scripts/01_generate.py --dev
 
 generate:
-	$(BLOCKED)
+	$(PY) scripts/01_generate.py
+
+dryrun:
+	$(PY) scripts/02_load_postgres.py --dry-run
+
+# --- gated targets ---------------------------------------------------------
+# Modules 08-23 are not written. validate and load read tables that do not exist
+# yet, so they refuse rather than failing halfway through.
+
+BLOCKED = @echo "BLOCKED: generation modules 08-23 are not built yet." && \
+	echo "Built: 02 dates, 03 geography, 04 sellers, 05 products," && \
+	echo "       06 customers + latents, 07 pre-window history." && \
+	echo "Next:  08 sessions onward. A26 fixes the 11a/11b/11c ordering." && \
+	echo "See docs/decision_register.md." && exit 1
 
 validate:
 	$(BLOCKED)

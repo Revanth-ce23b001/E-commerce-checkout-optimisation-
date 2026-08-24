@@ -550,7 +550,9 @@ Also emit a clean flat file an analyst would realistically receive, containing n
 
 ## 12. VALIDATION — MANDATORY, AUTOMATED, BEFORE ANY SUCCESS CLAIM
 
-Implement all 42 tests from the spec across seven families. **HARD** failures block; **SOFT** failures are logged and require written sign-off.
+Implement all **62** tests across seven families: VOL (4) · CAL (11) · EC (7) · BR (11) · LK (6) · DQ (16) · GT (7). **HARD** failures block; **SOFT** failures are logged and require written sign-off.
+
+> 62 tests (was stated as 42 — an arithmetic error; the family counts never summed to it). Rulings A4/A7/A9/A19 then added CAL-10, CAL-11, LK-06 and split DQ-07 into three. See docs/decision_register.md A17.
 
 | Family | Count | Covers |
 |---|---|---|
@@ -701,7 +703,7 @@ Plus:
 - [ ] All 12 analytical tables + 2 truth tables populated with referential integrity
 - [ ] `data/truth/_truth.json` committed, containing the run manifest, solved intercepts, all planted coefficients, and the hypothesis ground truth
 - [ ] Analyst-visible export with no latents and no leakage
-- [ ] All 42 validation tests implemented and runnable via `make validate`
+- [ ] All 62 validation tests implemented and runnable via `make validate`
 - [ ] `reports/data_validation_report.md` showing 🟢 DATASET READY (or documented 🟡)
 - [ ] Multi-seed check across 5 seeds, with the spread on every calibration target reported
 - [ ] Four sensitivity scenarios runnable via `scripts/run_scenarios.py`

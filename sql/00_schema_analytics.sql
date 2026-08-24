@@ -256,15 +256,28 @@ CREATE TABLE fct_customer_state_at_session (
     -- empirical-Bayes shrinkage, so it is materialised rather than recomputed.
     pit_orders_resolved     INT          NOT NULL,
     pit_rto_count           INT          NOT NULL,
-    pit_rto_rate_raw        NUMERIC(5,4) NOT NULL,
+    pit_rto_rate_raw        NUMERIC(5,4),           -- NULL when nothing has resolved
+    -- Decision A18 exception: empirical-Bayes shrinkage at n=0 RETURNS the
+    -- declared prior by construction. That is a computed value, not an imputed
+    -- one, so this column is never NULL. LK-06 asserts the prior is the declared
+    -- constant and not something derived from the generated population.
     pit_rto_rate_shrunk     NUMERIC(5,4) NOT NULL,  -- EB, k=8. Preferred risk feature
     pit_cod_orders          INT          NOT NULL,
-    pit_cod_share           NUMERIC(5,4) NOT NULL,  -- habit feature (H2/H4)
+    -- vvv Decision A18 (RULED): DO NOT IMPUTE. vvv
+    -- These are NULL for a customer with no prior orders. Imputing 0.62 into a
+    -- column that is then multiplied by +2.20 would manufacture a signal that
+    -- does not exist; imputing 0 would assert evidence that was never observed.
+    -- The customer's COD share is UNKNOWN, and the table says so. Analyst-side
+    -- models use the missing-indicator pattern via pit_has_history.
+    pit_cod_share           NUMERIC(5,4),           -- habit feature (H2/H4)
     pit_prepaid_success_count INT        NOT NULL,
     pit_payment_failure_count INT        NOT NULL,
-    pit_payment_failure_rate NUMERIC(5,4) NOT NULL,
-    pit_days_since_last_order INT,                  -- NULL if no prior order
-    pit_avg_order_value     NUMERIC(10,2) NOT NULL,
+    pit_payment_failure_rate NUMERIC(5,4),
+    pit_days_since_last_order INT,
+    pit_avg_order_value     NUMERIC(10,2),
+    -- The missing indicator itself.
+    pit_has_history         BOOLEAN      NOT NULL,  -- pit_orders_placed > 0
+    -- ^^^ Decision A18. ^^^
     pit_is_new_customer     BOOLEAN      NOT NULL,  -- pit_orders_delivered = 0
     pit_has_clean_record    BOOLEAN      NOT NULL,  -- >=3 delivered AND 0 RTO
     -- Decision A21: the blueprint §9.3 rule baseline is "payment method + prior
@@ -285,8 +298,20 @@ CREATE TABLE fct_customer_state_at_session (
                                           <= pit_orders_resolved),
     CONSTRAINT pit_cod_fits        CHECK (pit_cod_orders <= pit_orders_placed),
     CONSTRAINT pit_rates_range     CHECK (
-        pit_rto_rate_raw BETWEEN 0 AND 1 AND pit_rto_rate_shrunk BETWEEN 0 AND 1 AND
-        pit_cod_share BETWEEN 0 AND 1 AND pit_payment_failure_rate BETWEEN 0 AND 1),
+        (pit_rto_rate_raw         IS NULL OR pit_rto_rate_raw         BETWEEN 0 AND 1) AND
+        pit_rto_rate_shrunk BETWEEN 0 AND 1 AND
+        (pit_cod_share            IS NULL OR pit_cod_share            BETWEEN 0 AND 1) AND
+        (pit_payment_failure_rate IS NULL OR pit_payment_failure_rate BETWEEN 0 AND 1)),
+    -- Decision A18: missingness is not optional or accidental. A customer with no
+    -- prior orders MUST carry NULL on the history-derived rates, and one with
+    -- prior orders MUST carry a value. This makes "unknown" a checked state
+    -- rather than something a generator bug could silently fill in.
+    CONSTRAINT pit_history_flag    CHECK (pit_has_history = (pit_orders_placed > 0)),
+    CONSTRAINT pit_missing_iff_no_history CHECK (
+        (pit_cod_share       IS NULL) = (pit_orders_placed = 0) AND
+        (pit_avg_order_value IS NULL) = (pit_orders_placed = 0)),
+    CONSTRAINT pit_raw_rate_missing CHECK (
+        (pit_rto_rate_raw IS NULL) = (pit_orders_resolved = 0)),
     CONSTRAINT pit_new_coherent    CHECK (pit_is_new_customer = (pit_orders_delivered = 0)),
     CONSTRAINT pit_clean_coherent  CHECK (pit_has_clean_record =
                                           (pit_orders_delivered >= 3 AND pit_rto_count = 0)),

@@ -1,0 +1,20 @@
+# Development scenario — the 5,000-order dataset from CLAUDE.md stage gate 3.
+#
+# Deep-merged over config/params.yaml by src/config/loader.py, and hashed AFTER
+# the merge, so a dev run can never be mistaken for a full run.
+#
+# ONLY SCALE CHANGES HERE. Not one coefficient, target, or tolerance is touched:
+# a dev dataset that has different physics from the full one tests nothing.
+# The calibration tolerance widens automatically with sample size via
+# calibration_search.tolerance_n_scaling — that is arithmetic, not a parameter
+# change (decision A13).
+
+scale:
+  n_customers: 2800
+  n_sellers: 200
+  n_products: 900
+  # Still >=100 clusters per tier: the fairness-audit power floor in spec §15 is
+  # a structural requirement, not something to scale down for convenience.
+  # METRO is the binding tier at 22%, so this cannot go below 455.
+  n_geographies: 460
+  target_orders: 5000

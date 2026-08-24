@@ -58,19 +58,30 @@ Read the relevant section before implementing. Do not work from memory of a prev
 | Break-even RTO probability p\* | **25.7%** |
 
 ### The planted causal structure
-| Quantity | Value |
-|---|---|
-| `is_cod` coefficient in the RTO logit | **+1.60** |
-| True marginal effect of COD on RTO | **≈ 13.4pp** |
-| Naive observed COD−prepaid gap | **≈ 19.9pp** |
-| Selection share of the naive gap | **≈ 33%** |
-| Achievable risk-model AUC ceiling | **0.74 – 0.79** |
+
+Only the first row is an input. Everything else is an **output** — measured after
+generation, not asserted before it (decisions A6, A7). Treating an emergent
+quantity as an invariant is how a slope gets nudged to hit it.
+
+| Quantity | Value | Status |
+|---|---|---|
+| `is_cod` coefficient in the RTO logit | **+1.60** | **INVARIANT** — spec constant |
+| True marginal effect of COD on RTO | ≈ 13.4pp | **EXPECTED** — measured post-hoc as the AME |
+| Naive observed COD−prepaid gap | ≈ 19.9pp | **EMERGENT** |
+| Selection share of the naive gap | ≈ 33% | **EMERGENT** — gated by CAL-11 at [0.25, 0.45] |
+| Achievable risk-model AUC ceiling | 0.74 – 0.79 | **EXPECTED** |
+
+`rto_model.intercept_solved` (γ₀) is **not** a spec constant. It is whatever the
+calibrator solves for CAL-05. It is never moved to make the AME land on 13.4pp.
+
+**CAL-11 is the real gate.** If the selection share leaves [0.25, 0.45], the dataset
+no longer supports the case study — whatever the rate levels do.
 
 ---
 
 ## HARD RULES
 
-1. **Only two numbers may be calibrated:** `cod_model.intercept_solved` and `rto_model.intercept_solved`. Every slope is immutable. Test CAL-09 enforces this.
+1. **Only INTERCEPTS may be calibrated** — currently five (`cod`, `rto`, `conversion`, `pre_window_cod`, `pre_window_rto`). Every slope coefficient in every model block is immutable. CAL-09 enforces this across all blocks. If a new model block is added, its intercept may be calibrated and its slopes may not.
 
 2. **Never edit generated rows to pass validation.** Fix a parameter, regenerate, re-validate. No post-processing, no clamps, no fudge factors.
 
@@ -132,13 +143,22 @@ config → dates → geography → sellers → products
 
 ## VALIDATION
 
-42 tests, seven families: **VOL** (4) · **CAL** (9) · **EC** (7) · **BR** (11) · **LK** (5) · **DQ** (14) · **GT** (7).
+**62 tests**, seven families: **VOL** (4) · **CAL** (11) · **EC** (7) · **BR** (11) · **LK** (6) · **DQ** (16) · **GT** (7).
+
+The old "42" was an arithmetic error — the family counts never summed to it. The count then moved on the rulings: **+CAL-10** (reason-weight immutability, A4) · **+CAL-11** (selection share, A7) · **+LK-06** (declared shrinkage prior, A19) · **DQ-07 split into 07a / 07b / 07c** (A9). CAL-03 and CAL-04 were downgraded HARD → SOFT (A7) but are still counted.
 
 HARD failures block. SOFT failures require written sign-off in `docs/validation.md`.
 
 Behavioural tests need **effect-size floors**, not just significance — at 100K rows everything is significant.
 
-**GT-03 is designed to fail to fully recover the truth.** The adjusted COD effect should land in [15, 19]pp — moving toward 13.4 but not reaching it, because the latents are unobservable. If it lands exactly on 13.4, a hidden variable leaked.
+**GT-03 is designed to fail to fully recover the truth.** Re-anchored relatively by ruling A6, because the old fixed [15, 19]pp band became invalid once γ₀ > −3.00 — the band would then contain the truth, so an estimate that fully recovered the unobservable would *pass*, inverting the test.
+
+```
+PASS if  AME < adjusted < naive_gap
+AND      (adjusted − AME) / (naive_gap − AME) >= 0.35
+```
+
+The adjustment must move toward the truth without reaching it. If it lands *on* the AME, a hidden variable leaked.
 
 Verdict: 🟢 DATASET READY (all HARD pass, ≤2 SOFT) · 🟡 CONDITIONAL (3–5 SOFT, documented) · 🔴 NOT READY.
 
@@ -159,7 +179,7 @@ Code must be readable by a PM who knows basic Python and SQL. Prefer an explicit
 ```bash
 make dev         # generate 5,000-order development dataset
 make generate    # generate full 100K+ dataset
-make validate    # run all 42 validation tests → reports/data_validation_report.md
+make validate    # run all 62 validation tests → reports/data_validation_report.md
 make load        # load PostgreSQL, create views, apply REVOKE
 make test        # pytest — unit tests for generator code
 make all         # generate → validate → load

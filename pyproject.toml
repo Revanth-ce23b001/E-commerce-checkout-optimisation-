@@ -24,6 +24,11 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    # DDL parsing for `scripts/02_load_postgres.py --dry-run`, so the schema can be
+    # syntax-checked on a machine with no PostgreSQL. Dev-only and never imported by
+    # src/ — it does not touch the generated data. Added on explicit approval
+    # (2026-08-24); the approved stack in brief §4 is otherwise unchanged.
+    "sqlglot>=25.0",
 ]
 
 [build-system]
