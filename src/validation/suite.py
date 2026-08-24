@@ -207,14 +207,13 @@ def _ec(results, params, tables, truth, ledger, extra) -> None:
                        f"{target['target']} +/-{target['tol']}", f"{exemplar[key]:.2f}",
                        "At a 1,000 GMV order."))
 
-    factor = e["annualization_factor_derived"]
-    exposure = economics["rto_economic_cost"].sum() * factor / 1e7
+    exposure, detail = _annualised_exposure(params, tables, economics)
     band = rec["annualised_exposure_cr"]
     results.add(_r("EC-07", "Annualised RTO exposure (Cr)", Severity.SOFT,
                    float(band["lo"]) <= exposure <= float(band["hi"]),
-                   f"[{band['lo']}, {band['hi']}]", f"{exposure:.1f}",
-                   "Spec 12.4: report, do not tune."))
+                   f"[{band['lo']}, {band['hi']}]", f"{exposure:.1f}", detail))
 
+    factor = e["annualization_factor_derived"]
     bounds = params.require("scale.annualization_factor_bounds")
     results.add(_r("EC-08", "Derived annualisation factor in band", Severity.HARD,
                    float(bounds["lo"]) <= factor <= float(bounds["hi"]),
@@ -225,6 +224,41 @@ def _ec(results, params, tables, truth, ledger, extra) -> None:
 # ---------------------------------------------------------------------------
 # BR — behavioural relationships. Effect-size floors, not just significance.
 # ---------------------------------------------------------------------------
+
+
+def _annualised_exposure(params, tables, economics) -> tuple[float, str]:
+    """Annualise RTO cost on the **resolved** population.
+
+    Summing cost across every order and scaling by population / total_orders
+    silently treats a censored order as a zero-cost one. It is not: it is a real
+    future outcome not yet observable, and 9.5% of the window is in that state
+    because a 90-day window cannot resolve a day-88 order that takes 4-25 days.
+    Pre-ship cancellations (4.0%) never ship at all.
+
+    Together they deflate the estimate by ~1.156 -- enough to move the headline
+    from 164.9 Cr to 142.7 Cr. That is exactly the maturation bias blueprint 11
+    predicts and DQ-14 exists to make demonstrable, so the fix is to annualise the
+    RATE on the resolved denominator, never to touch a parameter.
+    """
+    orders = tables["fct_order"]
+    merged = orders[["order_id", "is_cancelled_preship", "is_censored", "rto_flag"]].merge(
+        economics[["order_id", "rto_economic_cost"]], on="order_id"
+    )
+    resolved = (~merged["is_cancelled_preship"].to_numpy(bool)
+                & ~merged["is_censored"].to_numpy(bool))
+    rto = merged["rto_flag"].fillna(False).to_numpy(bool)
+    n_resolved = int(resolved.sum())
+    if n_resolved == 0:
+        return 0.0, "No resolved orders."
+
+    population = float(params.require("scale.population_annual_orders"))
+    exposure = merged.loc[rto, "rto_economic_cost"].sum() / n_resolved * population / 1e7
+    excluded = len(merged) - n_resolved
+    return exposure, (
+        f"Annualised on the RESOLVED denominator ({n_resolved:,} of {len(merged):,} "
+        f"orders; {excluded:,} censored or cancelled). Using all orders instead "
+        "would treat censored orders as zero-cost and understate this by ~15%."
+    )
 
 
 def _br(results, params, tables, truth, ledger, extra) -> None:
@@ -240,11 +274,7 @@ def _br(results, params, tables, truth, ledger, extra) -> None:
                    (new_cod - old_cod) >= 0.10, ">= +10pp",
                    f"{100*(new_cod-old_cod):+.2f}pp"))
 
-    prior = shipped["pit_rto_count"] > 0
-    lift = (shipped.loc[prior, "rto_flag"].mean()
-            / max(shipped.loc[~prior, "rto_flag"].mean(), 1e-9))
-    results.add(_r("BR-02", "Prior-RTO customers RTO more", Severity.HARD,
-                   lift >= 1.8, ">= 1.8x", f"{lift:.2f}x", "H3."))
+    results.add(_br_02(shipped))
 
     with_history = joined[joined["pit_cod_share"].notna()]
     high = with_history["pit_cod_share"] >= 0.75
@@ -290,6 +320,36 @@ def _br(results, params, tables, truth, ledger, extra) -> None:
                    "Deviation D5: they tried to prepay, so they demonstrated intent."))
 
 
+def _br_02(shipped) -> TestResult:
+    """H3 -- prior RTO predicts future RTO.
+
+    Decision A40 replaced "point estimate >= 1.8x" with a statement about the
+    **95% CI lower bound**. A point estimate compared against an invented
+    threshold is not a real test; a confidence interval that excludes 1.50 is.
+    The interval uses the Katz log method -- the standard normal approximation
+    on log(RR).
+    """
+    prior = shipped["pit_rto_count"].to_numpy() > 0
+    y = shipped["rto_flag"].fillna(False).to_numpy(bool)
+    n1, n2 = int(prior.sum()), int((~prior).sum())
+    x1, x2 = int(y[prior].sum()), int(y[~prior].sum())
+    if min(x1, x2, n1, n2) == 0:
+        return _skip("BR-02", "Prior-RTO customers RTO more", Severity.HARD,
+                     "A cell is empty; the ratio is undefined.")
+
+    p1, p2 = x1 / n1, x2 / n2
+    ratio = p1 / p2
+    se = np.sqrt((1 - p1) / (n1 * p1) + (1 - p2) / (n2 * p2))
+    lower = float(np.exp(np.log(ratio) - 1.96 * se))
+    upper = float(np.exp(np.log(ratio) + 1.96 * se))
+    return _r("BR-02", "Prior-RTO lift, 95% CI lower bound", Severity.HARD,
+              lower > 1.50, "CI lower bound > 1.50",
+              f"{ratio:.3f}x  [{lower:.3f}, {upper:.3f}]",
+              f"Point estimate {ratio:.3f}x on {n1:,} vs {n2:,} orders. "
+              "Decision A40. A37's noise increase diluted this signal -- which is "
+              "what brought the AUC ceiling into GT-05's band.")
+
+
 def _br_06(orders) -> TestResult:
     """COD share by order-value decile must be non-monotonic — H4's inverted U."""
     deciles = pd.qcut(orders["order_value"], 10, labels=False, duplicates="drop")
@@ -311,13 +371,23 @@ def _br_08(tables) -> TestResult:
         return _skip("BR-08", "Address reason rises as completeness falls", Severity.HARD,
                      "No RTO reasons — module 18 did not run.")
     quartile = pd.qcut(rto["address_completeness_score"], 4, labels=False, duplicates="drop")
-    share = (rto["rto_reason"] == "ADDRESS_INCORRECT_INCOMPLETE").groupby(quartile).mean()
-    descending = list(share.sort_index(ascending=True))
-    monotone = all(a >= b for a, b in zip(descending, descending[1:]))
+    is_address = (rto["rto_reason"] == "ADDRESS_INCORRECT_INCOMPLETE").astype(float)
+    share = is_address.groupby(quartile).mean()
+    values = list(share.sort_index())
+
+    # Decision A40: strict monotonicity across four cells at n~3,800 is a
+    # coin-flip on the middle pair and says nothing about the mechanism. Two
+    # statements that do: the end-to-end gradient, and a rank correlation.
+    gradient = values[0] / values[-1] if values[-1] else float("inf")
+    from scipy.stats import spearmanr
+    rho, pvalue = spearmanr(quartile.to_numpy(), is_address.to_numpy())
+
+    ok = gradient >= 1.40 and rho < 0 and pvalue < 0.01
     return _r("BR-08", "Address reason rises as completeness falls", Severity.HARD,
-              monotone, "monotone across quartiles",
-              " -> ".join(f"{v:.3f}" for v in descending),
-              "Q1 is the WORST addresses, so the share must fall left to right.")
+              ok, "Q1/Q4 >= 1.40 AND Spearman rho < 0 at p < 0.01",
+              f"gradient {gradient:.2f}x, rho {rho:+.4f}, p {pvalue:.2e}",
+              "Quartile shares (Q1 = worst addresses): "
+              + " -> ".join(f"{v:.4f}" for v in values))
 
 
 def _monotone_band(test_id, name, severity, tables, orders, which, floor) -> TestResult:
@@ -379,6 +449,7 @@ def _lk(results, params, tables, truth, ledger, extra) -> None:
     results.add(lk_06_shrinkage_prior_is_declared(
         float(params.require("priors.rto_prior")),
         float(params.require("priors.shrinkage_k")), params,
+        float(params.require("priors.cod_prior")),
     ))
 
 

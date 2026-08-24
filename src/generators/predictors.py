@@ -20,12 +20,29 @@ The dynamic coefficients are recorded here too, so CAL-09 still compares what th
 generator *consumed* against ``params.yaml`` rather than comparing the config
 file to a copy of itself.
 
-Decision A18 throughout
------------------------
-A NULL point-in-time feature contributes exactly **0.0** — the term is switched
-off, not filled in. The level difference for historyless customers is already
-carried by ``is_new_customer``, an approved coefficient, so nothing new is
-invented and no habit signal is manufactured for a customer with no habit.
+Decision A39 — the history-rate terms are CENTRED
+-------------------------------------------------
+``pit_cod_share`` enters as ``(pit_cod_share − cod_prior)``, so a customer with
+no history contributes a deviation of exactly **0.0** — they sit at the
+population mean of the habit scale, not at its bottom.
+
+This corrects a real defect. Decision A18 (*no imputation, NULL plus a missing
+indicator*) is a ruling about the **analyst-facing tables**. Applying its
+"NULL → 0" convention inside the *generator* placed a historyless customer at the
+*never-used-COD* extreme, so an established customer of average habit received
+``+2.20 × 0.617 = +1.358`` on the COD logit that a new customer did not — working
+directly against ``is_new_customer = +0.70`` and pushing BR-01 to +6.96pp against
+a ≥10pp floor.
+
+Centring and imputing the prior are the **same model** up to a constant the
+intercept absorbs. So the real question was never "impute or not" — it was where
+a historyless customer sits on the habit scale, and the answer is the population
+mean. **No slope moves**; the intercepts re-solve.
+
+The centring constants are **declared**, never computed from the generated
+population — the same rule LK-06 enforces for the shrinkage prior, and for the
+same reason: a constant derived from realised outcomes would be a population-level
+leak that no column-level check could see.
 """
 
 from __future__ import annotations
@@ -217,10 +234,20 @@ def cod_dynamic(
     is_new: np.ndarray,
     orders_delivered: np.ndarray,
     payment_failure_rate: np.ndarray,
+    cod_prior: float,
 ) -> np.ndarray:
-    """The COD terms that move as history accumulates. NULL contributes 0.0 (A18)."""
+    """The COD terms that move as history accumulates.
+
+    Decision A39: ``pit_cod_share`` is centred on the declared prior, so a
+    historyless customer contributes a deviation of zero rather than sitting at
+    the never-used-COD end of the scale.
+
+    ``payment_failure_rate`` is deliberately left un-centred and is flagged for a
+    ruling — it is the one remaining history rate where NULL still means "zero",
+    though at +1.10 × 0.175 the effect is ~0.19 on the logit rather than 1.358.
+    """
     return (
-        coefficients["pit_cod_share"] * np.nan_to_num(pit_cod_share, nan=0.0)
+        coefficients["pit_cod_share"] * np.nan_to_num(pit_cod_share - cod_prior, nan=0.0)
         + coefficients["log1p_prepaid_success"] * np.log1p(prepaid_success)
         + coefficients["is_new_customer"] * is_new.astype(np.float64)
         + coefficients["log1p_orders_delivered"] * np.log1p(orders_delivered)

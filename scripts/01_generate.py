@@ -234,9 +234,15 @@ def report_economics(params, economics, orders, truth) -> None:
     print(f"   mean COD RTO cash loss      {e['cod_rto_cash_loss']:8.2f}")
     print(f"   mean COD RTO economic cost  {e['cod_rto_economic_cost']:8.2f}")
     print(f"   mean COD delivered CM       {e['cod_delivered_cm']:8.2f}")
+    # Annualise on the RESOLVED denominator: a censored order is a real future
+    # outcome, not a zero-cost one, and counting it as zero understates the
+    # headline by ~15% (decision A41).
+    resolved = (~orders["is_cancelled_preship"].to_numpy(bool)
+                & ~orders["is_censored"].to_numpy(bool))
+    rto_mask = orders["rto_flag"].fillna(False).to_numpy(bool)
     exposure = (
-        economics["rto_economic_cost"].sum()
-        * e["annualization_factor_derived"] / 1e7
+        economics.loc[rto_mask, "rto_economic_cost"].sum() / max(int(resolved.sum()), 1)
+        * float(params.require("scale.population_annual_orders")) / 1e7
     )
     print(f"   annualised RTO exposure     {exposure:8.1f} Cr   "
           f"EC-07 band 150-180 (SOFT)  {'PASS' if 150 <= exposure <= 180 else 'FAIL'}")
@@ -354,7 +360,7 @@ def report(params, setup, tables, history, solved, m, ledger) -> None:
     print("\n9. GUARDS")
     print(f"   [{cal_09_no_slope_changed(ledger, params, require_complete_coverage=False).status.value}]"
           f" CAL-09 slope immutability")
-    print(f"   [{lk_06_shrinkage_prior_is_declared(float(params.require('priors.rto_prior')), float(params.require('priors.shrinkage_k')), params).status.value}]"
+    print(f"   [{lk_06_shrinkage_prior_is_declared(float(params.require('priors.rto_prior')), float(params.require('priors.shrinkage_k')), params, float(params.require('priors.cod_prior'))).status.value}]"
           f" LK-06 declared shrinkage prior")
     geo_corr = address_tier_correlation(tables)
     print(f"   [INFO] corr(address_completeness, geo_tier rank) = {geo_corr:+.4f}"

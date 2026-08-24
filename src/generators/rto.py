@@ -84,20 +84,30 @@ def stage1_dynamic(
     is_cod: np.ndarray,
     paid_via_switch: np.ndarray,
     is_month_end: np.ndarray,
+    rto_prior: float,
+    cod_prior: float,
 ) -> np.ndarray:
     """The part of the Stage-1 logit that changes as history accumulates.
 
-    ``pit_cod_share`` arrives with NaN for historyless customers; decision A18
-    says the term is switched **off**, contributing exactly zero, rather than
-    imputed. The level shift for those customers is already carried by
-    ``is_new_customer`` (+0.45).
+    Decision A39: both history-rate terms are **centred on their declared
+    priors**, so a customer with no history contributes a deviation of zero and
+    sits at the population mean rather than at an extreme.
+
+    ``pit_rto_rate_shrunk`` reaches the prior by construction at n=0 — empirical
+    Bayes shrinks fully — so centring makes that customer's deviation exactly
+    zero, which is what "we know nothing about them" should mean.
+
+    ``pit_cod_share`` is centred here too. The ruling named the COD model's copy,
+    but this is the same variable with the same defect: leaving it un-centred
+    would put a historyless customer 0.35 × 0.617 = 0.216 below an average one on
+    the RTO logit, for no reason. Same variable, same treatment.
     """
     cod = is_cod.astype(np.float64)
     return (
-        coefficients["pit_rto_rate_shrunk"] * pit_rto_rate_shrunk
+        coefficients["pit_rto_rate_shrunk"] * (pit_rto_rate_shrunk - rto_prior)
         + coefficients["is_new_customer"] * pit_is_new.astype(np.float64)
         + coefficients["log1p_orders_delivered"] * np.log1p(pit_orders_delivered)
-        + coefficients["pit_cod_share"] * np.nan_to_num(pit_cod_share, nan=0.0)
+        + coefficients["pit_cod_share"] * np.nan_to_num(pit_cod_share - cod_prior, nan=0.0)
         + coefficients["is_cod"] * cod
         + coefficients["paid_via_switch"] * paid_via_switch.astype(np.float64)
         + coefficients["month_end_x_cod"] * is_month_end * cod

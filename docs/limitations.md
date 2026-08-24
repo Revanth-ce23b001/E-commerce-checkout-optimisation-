@@ -203,3 +203,58 @@ failing means the dataset stops supporting the case study, so it should be
 re-checked after any change to the RTO model.
 
 **Decision.** A37.
+
+---
+
+## L9 — Annualising a 90-day window must exclude censored orders
+
+**What.** The annualised RTO exposure must be computed as
+`(RTO ÷ resolved orders) × mean RTO cost × population`, **not** as
+`total RTO cost × population ÷ total orders`.
+
+**Why it matters — this is a real trap, and it cost ₹22 Cr.** In a 90-day window
+with 4–25 day outcome resolution, **9.5%** of orders are censored: a day-88 order
+cannot resolve before the window closes. A further **4.0%** cancel pre-ship and
+never generate an RTO at all.
+
+The naive formula treats a censored order as a **zero-cost** order. It is not — it
+is a real future RTO nobody can see yet. The deflation factor is exactly
+105,597 ÷ 91,363 = **1.1558**:
+
+| | |
+|---|---:|
+| all-order denominator (wrong) | ₹142.7 Cr |
+| **resolved denominator (correct)** | **₹164.9 Cr** |
+| spec §12.4 arithmetic | ₹164.7 Cr |
+
+**Why this is a finding and not just a bug.** It is exactly the maturation bias
+blueprint §11 predicts and DQ-14 exists to demonstrate rather than assert. An
+analyst who annualises a partial window naively will **under-size the opportunity
+by about a sixth** — and will do it invisibly, because nothing in the arithmetic
+looks wrong. The dataset contains the censoring precisely so that this can be
+shown rather than argued.
+
+**Decision.** A41.
+
+---
+
+## L10 — About 5% of RTO orders would have lost money even if delivered
+
+**What.** `counterfactual_cm_if_delivered` is negative for **4,956** RTO orders —
+roughly 5% of the RTO population. At low order values, fixed freight and packaging
+exceed the available margin.
+
+**Why it matters for Phase 3.** For those orders the RTO did not destroy value;
+delivery would have. No payment-reliability or address-quality intervention makes
+an unprofitable order profitable, so the intervention set needs a **"don't take
+this order"** tier alongside the payment and address levers.
+
+**Where to find it.** `fct_order_economics.counterfactual_cm_if_delivered` is
+stored per order, so the unprofitable-if-delivered population can be sliced
+directly without re-deriving anything.
+
+**How it surfaced.** DQ-04 flagged `foregone_cm` as a negative cost line. It is not
+a cost line — it is the counterfactual CM, and the test's exclusion list was
+incomplete. Fixing the test exposed the result.
+
+**Decision.** A42.

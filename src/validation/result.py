@@ -96,13 +96,32 @@ class ResultSet:
             if r.severity is Severity.SOFT and r.status is Status.FAIL
         ]
 
+    @property
+    def hard_skipped(self) -> list[TestResult]:
+        """HARD tests that could not run.
+
+        These are **not** passes. A verdict that ignored them would report a green
+        light on a dataset where a third of the leakage and ground-truth families
+        never executed — which is exactly the kind of quietly-wrong claim this
+        project exists to avoid making.
+        """
+        return [
+            r for r in self.results
+            if r.severity is Severity.HARD and r.status is Status.SKIP
+        ]
+
     def verdict(self) -> tuple[str, str]:
         """Apply the spec §18 PASS / CONDITIONAL PASS / FAIL rule.
+
+        Extended beyond §18 in one way: a skipped HARD test caps the verdict at
+        CONDITIONAL. The spec's rule assumed every test runs, and it does not here
+        — several need a live PostgreSQL or a fitted model that belongs to Phase 5.
 
         Returns ``(verdict, reason)``.
         """
         hard = len(self.hard_failures)
         soft = len(self.soft_failures)
+        skipped = self.hard_skipped
 
         if hard > 0:
             return (
@@ -112,10 +131,21 @@ class ResultSet:
             )
         if soft > 5:
             return "🔴 NOT READY", f"{soft} SOFT failures (>5)."
+
+        if skipped:
+            ids = ", ".join(r.test_id for r in skipped)
+            return (
+                "🟡 CONDITIONAL",
+                f"All HARD tests that RAN pass, and {soft} SOFT failure(s) — but "
+                f"{len(skipped)} HARD test(s) could not run and are NOT passes: {ids}. "
+                "They need a live PostgreSQL or a fitted model (Phase 5). Proceed only "
+                "with each one written into docs/limitations.md with a stated reason.",
+            )
+
         if soft >= 3:
             return (
                 "🟡 CONDITIONAL",
                 f"All HARD pass; {soft} SOFT failure(s). Each must be written into "
-                "docs/validation.md with a stated reason before proceeding.",
+                "docs/limitations.md with a stated reason before proceeding.",
             )
-        return "🟢 DATASET READY", f"All HARD pass; {soft} SOFT failure(s)."
+        return "🟢 DATASET READY", f"All HARD pass; {soft} SOFT failure(s); nothing skipped."

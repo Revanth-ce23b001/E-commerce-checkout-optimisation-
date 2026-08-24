@@ -51,6 +51,9 @@ def prepare(params, sessions, customers, latents, products, sellers, geography,
         "pre_window": WindowState.pre_window_arrays(customers),
         "index": build_day_index(sessions, customers),
         "prior": float(params.require("priors.rto_prior")),
+        # Decision A39 centring constants. DECLARED, never computed from the
+        # generated population -- LK-06 asserts both at runtime.
+        "cod_prior": float(params.require("priors.cod_prior")),
         "k": float(params.require("priors.shrinkage_k")),
         "address_share": float(params.require("distributions.conversion.address_hurdle_share")),
         "tier_rules": params.require("distributions.risk_tier_rules"),
@@ -185,6 +188,7 @@ def simulate_window(setup: dict, alpha0: float, beta0: float, gamma0: float,
                 + pred.cod_dynamic(
                     setup["cod_dyn"], pit["cod_share"], pit["prepaid_success"],
                     pit["is_new"], pit["delivered"], pit["payment_failure_rate"],
+                    setup["cod_prior"],
                 )
             )
             cod_intent = d["u_cod"][positions] < logistic(cod_logit)
@@ -272,6 +276,7 @@ def simulate_window(setup: dict, alpha0: float, beta0: float, gamma0: float,
                     pit["delivered"][ord_local], pit["cod_share"][ord_local],
                     cod_here[ord_local], outcome.switched_to_cod[ord_local],
                     ctx["is_month_end"][ord_pos],
+                    setup["prior"], setup["cod_prior"],
                 )
             )
             p_pre[ord_pos] = logistic(pre)

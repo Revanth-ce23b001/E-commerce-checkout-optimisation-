@@ -37,6 +37,7 @@ from src.validation.result import ResultSet, Severity, Status, TestResult
 # Structural key names, not business values.
 PRIORS_BLOCK = "priors"
 RTO_PRIOR_KEY = "rto_prior"
+COD_PRIOR_KEY = "cod_prior"
 SHRINKAGE_K_KEY = "shrinkage_k"
 
 
@@ -44,8 +45,12 @@ def lk_06_shrinkage_prior_is_declared(
     prior_used_at_runtime: float,
     k_used_at_runtime: float,
     params: Any,
+    cod_prior_used_at_runtime: float | None = None,
 ) -> TestResult:
-    """LK-06 (HARD) — the shrinkage prior used at runtime equals the declared constant.
+    """LK-06 (HARD) — every declared prior used at runtime matches params.yaml.
+
+    Covers the empirical-Bayes shrinkage prior AND, since decision A39, the two
+    centring constants the generator's logits use.
 
     Parameters
     ----------
@@ -62,8 +67,19 @@ def lk_06_shrinkage_prior_is_declared(
     """
     declared_prior = float(params.get(f"{PRIORS_BLOCK}.{RTO_PRIOR_KEY}"))
     declared_k = float(params.get(f"{PRIORS_BLOCK}.{SHRINKAGE_K_KEY}"))
+    declared_cod = float(params.get(f"{PRIORS_BLOCK}.{COD_PRIOR_KEY}"))
 
     problems: list[str] = []
+    # Decision A39 made both priors CENTRING constants in the generator's logits
+    # as well as the shrinkage prior, which widens what this test has to protect:
+    # a centring constant computed from the generated population would shift every
+    # customer's deviation by a function of realised outcomes.
+    if (cod_prior_used_at_runtime is not None
+            and float(cod_prior_used_at_runtime) != declared_cod):
+        problems.append(
+            f"cod_prior: params.yaml declares {declared_cod!r}, generator used "
+            f"{float(cod_prior_used_at_runtime)!r}"
+        )
     if float(prior_used_at_runtime) != declared_prior:
         problems.append(
             f"prior: params.yaml declares {declared_prior!r}, generator used "
@@ -80,8 +96,10 @@ def lk_06_shrinkage_prior_is_declared(
         name="Shrinkage prior is a declared constant, not computed from the data",
         severity=Severity.HARD,
         status=Status.PASS if not problems else Status.FAIL,
-        expected=f"prior={declared_prior}, k={declared_k} (exact)",
-        actual=f"prior={float(prior_used_at_runtime)}, k={float(k_used_at_runtime)}",
+        expected=f"rto_prior={declared_prior}, cod_prior={declared_cod}, "
+                 f"k={declared_k} (exact)",
+        actual=(f"rto_prior={float(prior_used_at_runtime)}, "
+                f"cod_prior={cod_prior_used_at_runtime}, k={float(k_used_at_runtime)}"),
         delta="identical" if not problems else "DIFFERS",
         detail=(
             ""

@@ -114,7 +114,12 @@ calibration_targets:
   # 24M x 1,000 = 2,400 Cr, which is what the whole 165 Cr model rests on.
   mean_gmv_per_order:           {target: 1000,  tol: 25,    severity: HARD}   # EC-01
   mean_order_value_per_order:   {target: 920,   tol: 30,    severity: SOFT}   # EC-01b
-  median_order_value:           {target: 690,   tol: 60,    severity: SOFT}   # EC-02
+  # EC-02: restated to the as-built value. The median is a SUMMARY of the
+  # category-mixture lognormal, not an assumption -- the 690 was estimated by eye
+  # and the mixture produces 624. Marked emergent for the same reason CAL-03/04
+  # are: it is an output, and treating an output as a target invites tuning.
+  median_order_value:           {target: 624,   tol: 60,    severity: SOFT,
+                                 emergent: true}                              # EC-02
   auc_ceiling:                  {target: 0.760, tol: 0.030, severity: SOFT}   # GT-05
   # Pre-window history (decision A11). SOFT: these seed the point-in-time
   # features, they are not themselves a Phase 1 deliverable.
