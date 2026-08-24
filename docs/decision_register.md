@@ -1286,14 +1286,14 @@ quietly-wrong claim of exactly the kind this project exists to avoid.
 
 | Level | Solved | Realised |
 |---|---:|---:|
-|  | 1.039062 | mean GMV 1001.17 |
-|  conversion | +0.281250 | 0.6813 |
-|  COD | +0.750000 | 0.6175 |
-|  RTO | -4.687500 | 0.1624 blended |
-|  pre-window | +0.515625 | 0.6166 |
-|  pre-window | -3.375000 | 0.1671 |
-|  | 9.0000 | NDR mean 18.00 |
-| ** FROZEN** | **3.3125** | AUC 0.7720 |
+| `product_price_scalar` | 1.039062 | mean GMV 1001.17 |
+| `alpha_0` conversion | +0.281250 | 0.6813 |
+| `beta_0` COD | +0.750000 | 0.6175 |
+| `gamma_0` RTO | -4.687500 | 0.1624 blended |
+| `pi_cod0` pre-window | +0.515625 | 0.6166 |
+| `pi_rto0` pre-window | -3.375000 | 0.1671 |
+| `support_ndr_base` | 9.0000 | NDR mean 18.00 |
+| **`noise_sd` FROZEN** | **3.3125** | AUC 0.7720 |
 
 Drift 0.00e+00 on every solved level.
 
@@ -1309,13 +1309,13 @@ Drift 0.00e+00 on every solved level.
 | derived annualisation factor | **227.28** | 240 |
 
 The naive estimate is **1.76x the truth**. The spec prose figures belong to
- (limitation L8); everything downstream quotes .
+ (limitation L8); everything downstream quotes `_truth.json`.
 
 ### Open items
 
 | # | Item |
 |---|---|
-| A39 follow-on |  is the one remaining un-centred history rate (+1.10 x 0.175 = +0.19). Flagged, not changed. |
-| A33 |  delivery distributions still unapproved |
+| A39 follow-on | `cod_model.payment_failure_rate` is the one remaining un-centred history rate (+1.10 x 0.175 = +0.19). Flagged, not changed. |
+| A33 | `[A33 PROPOSED]` delivery distributions still unapproved |
 | - | Modules 22-23 (PostgreSQL load, report rendering) not built; no server available |
-| - |  still absent |
+| - | `docs/data_generating_process.md` still absent |
