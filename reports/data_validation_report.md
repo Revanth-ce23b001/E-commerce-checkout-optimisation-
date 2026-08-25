@@ -7,9 +7,9 @@ All HARD tests that RAN pass, and 0 SOFT failure(s) — but 6 HARD test(s) could
 ## 1 — Dataset summary
 
 - master seed: `20260115`
-- params sha256: `55b26c159584ea9736f036cce986021a…`
-- dgp sha256: `a188db118d8b1d46668ea2558abdca06…`
-- generated: 2026-08-24T20:00:56.662867+00:00
+- params sha256: `40327eb7aec2cf00ac4179f4421b6a51…`
+- dgp sha256: `ba17a1622d923d2d006b2e008172d4c5…`
+- generated: 2026-08-25T17:37:18.283916+00:00
 
 | Table | Rows |
 |---|---:|

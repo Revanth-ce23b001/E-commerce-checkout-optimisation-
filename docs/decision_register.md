@@ -1380,7 +1380,7 @@ under a flagged spec gap.*
 
 **Modules 02-21 built. Full validation runs. PHASE 2B EXIT CONDITION MET.**
 
-**146 unit tests passing.**
+**170 unit tests passing** (146, plus 24 added with A45).
 
 ### Validation - 65 tests, full scale, seed 20260115
 
@@ -1439,42 +1439,315 @@ The naive estimate is 1.77x the truth. Downstream reads data/truth/_truth.json.
 
 Both are results, not defects. Neither was tuned toward its prior.
 
-### A44 - Five defects that only a LIVE database could find · **RESOLVED**
+### A44 — Constraints are only constraints once executed · **RESOLVED**
 
-The parquet layer enforces nothing. Applying the DDL to real rows for the first
-time surfaced five defects in a single sitting, none of which any of the 42
-data-validation tests or the 146 unit tests had detected. Each is recorded here
-because "the load found it" is the interesting part -- the schema was written
-months of work before it was ever executed, and text that has never run is not a
-constraint.
+> Six defects survived 146 unit tests and 42 data-validation tests, and died
+> within minutes of the schema being run against real rows for the first time.
+> None of them was a modelling error. Every one was a promise the schema made
+> that the generator never kept.
 
-| # | Defect | Caught by | Resolution |
-|---|---|---|---|
-| 1 | `fct_order` missing four DDL columns: `seller_id`, `discount_amount`, `shipping_fee_charged`, `cod_fee_charged`. `ndr_code` present but belongs on `fct_delivery_event` (spec 3.11) | `NotNullViolation` on `seller_id` | Added to `build_orders`; `ndr_code` carried in memory for the delivery-event projection and dropped before write |
-| 2 | Every cost line rounded to paisa independently, so `contribution_margin = net_revenue - cogs - total_variable_cost` failed by up to 1 paisa | `CheckViolation: eco_cm_identity`, first row | Quantise the LINES, then re-derive the aggregates from the quantised lines. Money is paisa-quantised and a ledger must add up. Every figure moves by at most 1 paisa |
-| 3 | `pit_avg_order_value` hardcoded `np.nan` -- a permanently empty column | `pit_missing_iff_no_history` CHECK | Populated from the day loop. Now 54.83% dense, mean 926.82 |
-| 4 | `pit_days_since_last_order` never materialised. The day loop collected `pit_last_order_day` and nothing consumed it. **This is a WHITELISTED risk-model feature** (`leakage_guard.safe_feature_whitelist`, `sql/04` line 70) -- Phase 3 would have trained on a column of nulls | pre-flight column diff | Computed in `materialise.build_state` from the collected array |
-| 5 | `true_cod_propensity` left `np.nan` at module 06 with a comment saying it is "filled at the module-20 roll-up". The roll-up was never written | `NotNullViolation` | Rolled up as the customer-level mean `p_cod_intent`. The `NOT NULL` was **removed**: 3,284 of 55,000 customers (6.0%) open no in-window session, so the mean has no denominator. Spec 3.13 declares the type only -- the `NOT NULL` was added here and was wrong. Decision A18 applies unchanged: NULL, never imputed |
+This is the most valuable finding of Phase 2B, and it is a methodology finding
+rather than a bug log. It belongs in the case study's methodology section, not
+in a changelog.
 
-Defects 3, 4 and 5 are one failure mode wearing three hats: a placeholder written
-early, a `TODO` in a comment rather than in the code, and no check anywhere that
-a declared column is ever populated. Defect 4 is the dangerous one -- it is on
-the safe-feature whitelist, so it would have reached a fitted model silently.
+#### The finding
 
-**Added to the pre-flight**: every table's frame is diffed against
-`information_schema.columns` before the COPY, and NOT NULL columns are checked
-for nulls. Columns with a server-side default (the three `SERIAL` surrogate keys)
-are exempt.
+`sql/00_schema_analytics.sql` and `sql/01_schema_truth.sql` were written early
+and carefully: 102 CHECK predicates, every foreign key, NOT NULL on everything
+that must exist. They were the most precise statement of intent in the entire
+project — more precise than the spec prose, more precise than any test.
 
-**Nothing here touched a slope, a level or a business assumption.** Defect 2 is a
-representation decision; the rest are columns that were specified and never
-filled.
+They had never been run.
+
+For the whole of Phase 2B the pipeline wrote Parquet, and the validation suite
+read Parquet. Parquet has no NOT NULL, no CHECK, no foreign key, and no type
+coercion. A column that is 100% NULL is a perfectly well-formed Parquet column.
+So the schema sat in the repository looking like enforcement and behaving like
+a comment. The first `COPY` into PostgreSQL found six defects in one sitting.
+
+#### Why neither test layer could have caught them
+
+This is the part worth generalising, because "we should have tested more" is the
+wrong lesson. Both layers were working correctly and neither was capable of
+seeing these defects.
+
+| Layer | What it checks | Why it was blind here |
+|---|---|---|
+| 146 unit tests (`tests/`) | What the generator **code** does | The DDL is not an input to them. They assert that a function returns what it was written to return. A column the schema declares and the code never mentions is invisible — there is no code to test |
+| 42 data tests (`src/validation/`) | Relationships in the generated **data** | They assert relationships someone *thought of*. All six defects lived in relationships that were *declared once and never thought of again* |
+| The DDL (`sql/`) | Everything, precisely | Never executed. A constraint no engine has read is prose |
+
+The gap between "written down" and "enforced" is invisible and does not decay
+gracefully. It does not get gradually less true; it simply sits there, looking
+identical to enforcement, until something executes it.
+
+#### The six defects
+
+| # | Defect | Caught by | Class | Resolution |
+|---|---|---|---|---|
+| 1 | `fct_order` missing four DDL columns: `seller_id`, `discount_amount`, `shipping_fee_charged`, `cod_fee_charged`. `ndr_code` present but belongs on `fct_delivery_event` (spec §3.11) | `NotNullViolation` on `seller_id` | declared, never produced | Added to `build_orders`; `ndr_code` carried in memory for the delivery-event projection and dropped before write |
+| 2 | Every cost line rounded to paisa independently, so `contribution_margin = net_revenue − cogs − total_variable_cost` failed by up to 1 paisa | `CheckViolation: eco_cm_identity`, **first row** | identity not preserved by representation | Quantise the LINES, then derive the aggregates from the quantised lines. Money is paisa-quantised and a ledger must add up. Every figure moves by at most 1 paisa |
+| 3 | `pit_avg_order_value` hardcoded `np.nan` — a permanently empty column | `pit_missing_iff_no_history` CHECK | placeholder that outlived its TODO | Populated from the day loop. Now 54.83% dense, mean ₹926.82 |
+| 4 | `pit_days_since_last_order` never materialised. The day loop collected `pit_last_order_day` and nothing consumed it. **This is a WHITELISTED risk-model feature** (`leakage_guard.safe_feature_whitelist`, `sql/04` line 70) | pre-flight column **diff** — no constraint fired | declared, never produced | Computed in `materialise.build_state` from the collected array |
+| 5 | `true_cod_propensity` left `np.nan` at module 06 with a comment saying it is "filled at the module-20 roll-up". The roll-up was never written | `NotNullViolation` | placeholder that outlived its TODO | Rolled up as the customer-level mean `p_cod_intent`. The `NOT NULL` was **removed** — see below |
+| 6 | `logit_cod_components` / `logit_rto_components` declared JSONB and entirely NULL | all-NULL pre-flight check | declared, never produced | Ruled on separately: populated for a documented 2,000-session audit sample (**A45**), with `components_populated` making the remaining NULLs explicit |
+
+#### Defect 4 is the one that matters
+
+Defects 1, 3, 5 and 6 announced themselves. Defect 4 did not. It would have
+loaded cleanly, satisfied every foreign key, passed all 42 data-validation
+tests, and handed Phase 3 a **whitelisted risk-model feature containing nothing
+but nulls**. There would have been no error anywhere. A model would have trained,
+scored, and quietly been one feature short — and the most likely outcome is that
+nobody ever finds out, because a slightly worse AUC looks exactly like a slightly
+harder problem.
+
+Two things follow.
+
+**Loud failures are cheap; silent ones are not.** The severity ordering of these
+six is inverted relative to their noisiness. Defect 1 stopped the load on the
+first row and cost ten minutes. Defect 4 cost nothing to *find* only because a
+diff happened to exist, and would have cost Phase 3 a feature.
+
+**Constraints and diffs catch different things.** A constraint catches a
+violation of something you asserted. It cannot catch the absence of something you
+forgot to assert — for that you need to compare two independent descriptions of
+what should exist. Defect 4 was found by diffing the DataFrame's columns against
+`information_schema.columns`: two lists that were supposed to agree, written
+months apart by the same person, that did not. No CHECK predicate would ever have
+fired, because nothing was violated. Something was merely missing.
+
+#### What actually changed, as opposed to what was learned
+
+The lesson is worthless on its own. Written in this register, "constraints are
+only constraints once executed" enforces exactly as much as the DDL did before it
+was run — nothing. What makes A44 real is that the checks now execute:
+
+- **`scripts/02_load_postgres.py` pre-flight.** Before any `COPY`, every table's
+  frame is diffed against `information_schema.columns`, and any declared column
+  that is absent from the frame, or present and entirely NULL, **blocks the
+  load**. Columns with a server-side default (the three `SERIAL` surrogate keys)
+  are exempt.
+- **`KNOWN_EMPTY` is a registry, not an escape hatch.** A genuinely known gap has
+  to be named there, and every load then prints it. An exception that is
+  invisible is indistinguishable from a bug. It is currently empty.
+- **`PARTIAL_BY_DESIGN` (added with A45).** Stricter than the all-NULL check: a
+  partially-populated column must be non-null in exactly the rows its flag
+  column claims, and null in exactly the rest. The realistic failure — a sample
+  silently collapsing to a handful of rows — passes an all-NULL check trivially
+  and fails this one.
+- **`scripts/04_verify_database.py` re-scans, it does not ask.** All 104 CHECK
+  predicates are re-evaluated row by row and every FK is re-verified by
+  anti-join. `ALTER TABLE … VALIDATE CONSTRAINT` was the obvious implementation
+  and is worthless: a constraint created normally is already marked valid, so
+  VALIDATE returns success without reading a row. That is the same
+  intent-versus-enforcement trap as inspecting `pg_catalog` for LK-05, and the
+  same trap as this whole decision.
+- **`reports/database_checks.json` is hash-gated.** A stale results file reports
+  SKIP rather than a fabricated PASS.
+
+#### Defect 5's `NOT NULL` was removed, and that is a finding too
+
+3,284 of 55,000 customers (6.0%) open no in-window session, so their mean
+`p_cod_intent` has no denominator. Spec §3.13 declares the column's *type* only;
+the `NOT NULL` was added when the DDL was written and was simply wrong.
+
+Decision **A18** applies unchanged: a statistic with an empty denominator is
+NULL, never imputed. Imputing 0.62 would invent 3,284 fictitious COD-average
+customers *inside the truth table* — the one place in the project where a
+fabricated value cannot be caught downstream, because it is the thing everything
+else is checked against. This is the same pattern as **A30**
+(`pit_avg_order_value`), and both are recorded in `docs/limitations.md`
+(**L11**, **L2**).
+
+The general form: **a constraint can be wrong.** Executing the schema does not
+only find defects in the data — it finds defects in the schema. Five of the six
+were the generator failing to meet the DDL. One was the DDL asserting something
+about the world that is not true.
+
+#### Scope
+
+**Nothing here touched a slope, a level, or a business assumption.** Defect 2 is
+a representation decision; the rest are columns that were specified and never
+filled. The parts of the system that were *exercised* were correct. The parts
+that were merely *described* were not — which is the whole finding, stated as
+narrowly as it can be.
+
+### A45 — `logit_*_components`: populate a documented sample · **RULED · APPLIED**
+
+Defect 6 of A44, ruled separately because it was a design choice rather than a
+bug: the two JSONB trace columns were declared in the schema and were entirely
+NULL.
+
+**Ruling: populate a documented 2,000-session stratified sample.** Not the full
+table, and not a drop from the DDL.
+
+#### Why the columns exist at all
+
+They make **GT-01 auditable**. When Phase 5 regresses the generated data and
+compares recovered coefficients against planted ones, "the regression matched"
+is a materially weaker claim than "here is one order, and here is every additive
+term that produced its probability." The second is checkable by hand by a
+reviewer who does not trust the regression.
+
+That is a *lookup*, one order at a time. It is never a scan. Populating all
+155,000 sessions costs roughly **190 MB of JSONB** for a query nobody runs in
+bulk — which is why full population was rejected.
+
+#### The sample
+
+| Stratum | Rows | Why anyone would open it |
+|---|---:|---|
+| `random_sessions` | 500 | Unbiased draw across all sessions, orders or not, so the sample is not only its own tail |
+| `cod_rto` | 500 | A COD order that came back — the central case of the study |
+| `prepaid_rto` | 500 | A prepaid order that came back — the comparison case |
+| `high_risk_delivered` | 500 | Top-decile `p_rto_precheckout` that arrived safely — where the score was "wrong", and the honest face of the 0.77 ceiling |
+
+Strata overlap is permitted and de-duplicated, so the realised count is **1,995**
+of a 2,000 target — recorded in `_truth.json`, not assumed. 1,836 of those carry
+an RTO trace; the remainder are sessions that produced no order and therefore
+have no RTO logit to decompose, which is the same rule `tp_rto_pair` already
+applies to `p_rto_precheckout`.
+
+The rule lives in `params.yaml` under `truth_sampling:` and draws from its own
+seed substream, **appended to the end** of the list per CLAUDE.md invariant 11.
+
+#### `components_populated`
+
+A new `BOOLEAN NOT NULL` column. Without it, "no components" and "not sampled"
+are indistinguishable, and an ambiguous NULL is precisely the defect class A44
+was written about. Two CHECK constraints make the flag a fact about the data
+rather than a label that can drift from it:
+
+```sql
+components_populated = (logit_cod_components IS NOT NULL)
+(logit_rto_components IS NOT NULL)
+    = (components_populated AND p_rto_precheckout IS NOT NULL)
+```
+
+It is deliberately given **no DEFAULT**: the loader's pre-flight exempts
+defaulted columns from its "declared but absent from the frame" check, so a
+default would quietly excuse the generator from ever emitting it.
+
+#### The reconstruction problem, and why the trace can be trusted
+
+Three of the four strata are defined by *outcomes*, so the sample cannot be drawn
+until the day loop has finished — and the trace therefore has to be rebuilt
+afterwards rather than recorded as it runs.
+
+That is the risk. A second implementation of the logit is free to drift from the
+first, and **a drifted trace is worse than an empty column, because a reader
+would trust it.** Two things prevent it:
+
+1. **One implementation.** `cod_dynamic`, `stage1_dynamic` and
+   `post_dispatch_shock` were refactored to build a dict of *named terms*; the
+   day loop adds `sum_terms(...)` of that dict. The trace reads the same
+   functions. There is no parallel copy to drift.
+2. **The check executes.** `build_component_traces` re-derives every sampled
+   probability from its own trace and raises unless it matches what the day loop
+   stored, to 1e-9. Realised worst error: **8.88e-16** — machine epsilon.
+
+Splitting a summed expression into named terms is only safe if it moves no bits,
+because the day loop's arithmetic is what every calibrated intercept was solved
+against. Accumulating into a zero array reproduces the inline expression's
+left-to-right order exactly (`0.0 + x` is exact in IEEE-754). This is asserted in
+`tests/test_components.py` against the original expressions written out by hand,
+and **demonstrated end to end**: the `fct_order` content hash is byte-identical
+across the refactor *and* the substream append.
+
+```
+before  49b066f06ed1fae63fb5ef65c88cbf5c1199f86c9267936d869b590357cd2aee
+after   49b066f06ed1fae63fb5ef65c88cbf5c1199f86c9267936d869b590357cd2aee
+```
+
+That single comparison is also the first live proof of the append-only substream
+rule: adding `truth_sampling` to the end of the list left every existing stream
+byte-identical, exactly as `SeedSequence.spawn` promises.
+
+#### What a trace looks like
+
+Stage-1 terms are bare; the four post-dispatch shock terms are prefixed
+`shock.`, so a reader can always tell which half was knowable at checkout. Each
+trace carries its own totals, so the decomposition can be verified by adding the
+named terms up without re-running anything.
+
+```
+__intercept__                     -4.687500      shock.courier_reliability_z_neg   +0.359330
+latent_intent                     +0.872060      shock.attempt_delay_days          +0.826062
+address_completeness              -1.075200      shock.seller_dispatch_late        +0.250000
+pit_rto_rate_shrunk               +0.259778      shock.nu                          +4.600444
+is_cod                            +1.600000      __total_precheckout__             -0.872270
+...  (23 stage-1 terms)                          __total_final__                   +5.163567
+```
+
+`is_cod = +1.600000` is the planted invariant, sitting as one additive term among
+23 — visible, and one line of SQL away:
+
+```sql
+SELECT DISTINCT (logit_rto_components->>'is_cod')::numeric, count(*)
+FROM truth.truth_order_probability
+WHERE logit_rto_components IS NOT NULL GROUP BY 1;
+--   0.0 |  638      (prepaid)
+--   1.6 | 1198      (COD)
+```
+
+#### Loader consequence
+
+The two `KNOWN_EMPTY` registrations are gone; that registry is now **empty**.
+They are replaced by `PARTIAL_BY_DESIGN`, which is a stricter check, not a softer
+one: the column must be non-null in exactly the rows the flag claims and null in
+exactly the rest. The realistic failure — the sample silently collapsing to a
+handful of rows — passes an all-NULL check trivially and fails this one.
+
+Limitation **L12** is restated accordingly: no longer "declared but empty", but
+"populated for a documented 2,000-session audit sample; full population rejected
+at 190 MB for a diagnostic that is never run in bulk."
+
+#### A45 exposed a hole in the staleness guard, and it is an A44 hole
+
+`reports/database_checks.json` carries the hash of the dataset it ran against, so
+that a stale file reports SKIP rather than a fabricated PASS. That guard hashed
+**only the data**.
+
+A45 is precisely the change it could not see. The whole point of the refactor was
+that `fct_order` came out byte-identical — while the schema gained a column and
+two CHECK constraints. A data-only guard would therefore have accepted a results
+file asserting "102 check predicates re-evaluated, 0 violations" as current
+evidence about a schema that now has 104. **LK-01 is the sharper case**: it is a
+claim about the columns of a *view*, and a view lives entirely in the DDL, so the
+data hash says nothing whatsoever about whether the result is still true.
+
+Two things can go stale independently. Both are now hashed: `ddl_sha256` covers
+every `sql/*.sql` file, by name and by content, in name order.
+
+Verified by execution rather than by assertion — the file's `ddl_sha256` was
+poisoned while leaving the data hash correct:
+
+```
+[SKIP] LK-01   View columns subset of safe whitelist        not runnable
+[SKIP] LK-05   analyst role has zero privileges on truth    not runnable
+[SKIP] DQ-01   Reproducibility hash matches manifest        not runnable
+65 tests | 56 pass | 0 HARD fail | 0 SOFT fail | 9 skip
+```
+
+The three degrade to SKIP, and the verdict text names them as "NOT passes". Five
+tests in `tests/test_validation_gates.py` pin the hash's sensitivity, including
+the realistic A45 shape: a new `.sql` file added alongside untouched ones.
+
+This is the same finding as A44, one level up. A44 was "the schema was never
+executed against data". This is "the guard on the schema's own evidence was never
+executed against a schema change". Both were correct-looking, both were inert,
+and both only became visible when something actually ran.
+
+**No slope, level or business assumption moved.**
 
 ### Remaining
 
 | Item | Status |
 |---|---|
-| Modules 22-23 (PostgreSQL load, report render) | not built; no server available |
-| LK-01, LK-05, DQ-01 | unblock with a PostgreSQL instance |
 | BR-09, GT-01/03/04/06/07 | Phase 5, need fitted models |
-| docs/data_generating_process.md | still absent |
+| `docs/data_generating_process.md` | still absent |
+
+Modules 22-23 (PostgreSQL load, report render) are built. LK-01, LK-05 and
+DQ-01 are verified against a live server; DQ-01 compares two independent
+generation runs, not a manifest against the run that wrote it.

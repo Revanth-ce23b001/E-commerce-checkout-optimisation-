@@ -162,7 +162,10 @@ def simulate_window(setup: dict, alpha0: float, beta0: float, gamma0: float,
                      "pit_placed", "pit_resolved", "pit_delivered", "pit_rto_count",
                      "pit_cod_orders", "pit_success", "pit_failures", "pit_new",
                      "pit_last_order_day", "p_convert", "p_cod_intent",
-                     "pit_avg_order_value"):
+                     # Decision A45: the fourth Stage-2 shock input. Collected so
+                     # the shock decomposes into its four named terms rather than
+                     # appearing in the trace as one opaque total.
+                     "pit_avg_order_value", "seller_dispatch_late"):
             collected[name] = np.full(n, np.nan)
         collected["order_tier"] = np.array([None] * n, dtype=object)
         collected["cancel_actor"] = np.array([None] * n, dtype=object)
@@ -293,13 +296,13 @@ def simulate_window(setup: dict, alpha0: float, beta0: float, gamma0: float,
             p_pre[ord_pos] = logistic(pre)
 
             # -- module 16: delivery + the post-dispatch shock --------------
-            courier_z = _z_of(ctx["courier_reliability"], ord_pos)
+            courier_z = population_z(ctx["courier_reliability"], ord_pos)
             order_day = np.full(len(ord_pos), float(day))
             timeline = rto_mod.delivery_timeline(
                 p, order_day,
                 ctx["estimated_delivery_days"][ord_pos],
                 ctx["base_delivery_days"][ord_pos], courier_z,
-                _z_of(ctx["seller_sla_breach_rate"], ord_pos),
+                population_z(ctx["seller_sla_breach_rate"], ord_pos),
                 d["u_dispatch"][ord_pos], d["u_transit"][ord_pos],
                 setup["shock_coef"]["seller_sla_dispatch_weight"],
             )
@@ -376,7 +379,7 @@ def _scaled_failure(setup, positions, pit) -> np.ndarray:
     return np.clip(base * (1.0 + float(cfg["customer_failure_multiplier"]) * history), 0.0, 0.98)
 
 
-def _z_of(values: np.ndarray, positions: np.ndarray) -> np.ndarray:
+def population_z(values: np.ndarray, positions: np.ndarray) -> np.ndarray:
     """Standardise against the WHOLE population, not the day's subset.
 
     Standardising per day would make a coefficient mean something different on a
@@ -388,6 +391,7 @@ def _z_of(values: np.ndarray, positions: np.ndarray) -> np.ndarray:
 
 def _collect(collected, ord_pos, ord_local, pit, timeline, shock, resolved, actor, tier):
     collected["attempt_delay"][ord_pos] = timeline["attempt_delay_days"]
+    collected["seller_dispatch_late"][ord_pos] = timeline["seller_dispatch_late"]
     collected["dispatch_lag"][ord_pos] = timeline["dispatch_lag_days"]
     collected["shock"][ord_pos] = shock
     collected["days_to_resolve"][ord_pos] = resolved["days_to_resolve"]

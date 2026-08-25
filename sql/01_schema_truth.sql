@@ -83,12 +83,38 @@ CREATE TABLE truth.truth_order_probability (
     p_cod_intent            NUMERIC(6,5),
     -- Every additive term in the COD logit, by name. Lets Phase 5 decompose an
     -- individual session's probability into its named drivers.
+    --
+    -- DECISION A45 -- POPULATED FOR A DOCUMENTED SAMPLE, NOT FOR EVERY ROW.
+    -- These columns exist to make GT-01 auditable: a reviewer opens ONE order and
+    -- reads every term that produced its probability. That is a lookup, never a
+    -- scan, so 2,000 stratified sessions are traced rather than all 155,000 --
+    -- full population cost ~190 MB of JSONB for a query nobody runs in bulk.
+    -- The strata are a random draw plus the three cases anyone would actually
+    -- open: a COD order that came back, a prepaid order that came back, and a
+    -- high-risk order that arrived safely. The rule lives in params.yaml under
+    -- `truth_sampling` and is drawn from its own seed substream.
+    --
+    -- Each trace carries its own totals (`__total__`, `__probability__`), so the
+    -- decomposition can be checked by adding the named terms up. The generator
+    -- already does exactly that and refuses to store a trace that disagrees with
+    -- the probability the day loop recorded.
     logit_cod_components    JSONB,
     -- NULL for sessions that produced no shipped order.
     p_rto_precheckout       NUMERIC(6,5),
     p_rto_final             NUMERIC(6,5),
+    -- Both RTO stages. Stage-1 terms are bare; the post-dispatch shock's four
+    -- terms are prefixed `shock.`, so a reader can always tell which half of the
+    -- trace was knowable at checkout. NULL where the session produced no order.
     logit_rto_components    JSONB,
     post_dispatch_shock     NUMERIC(6,4),
+    -- Decision A45. Says whether this row was drawn into the audit sample, which
+    -- is what turns ~153,000 NULL traces from an unexplained gap into a stated
+    -- one. Without it "no components" and "not sampled" are indistinguishable,
+    -- and an ambiguous NULL is exactly the defect class A44 was written about.
+    -- Deliberately NO DEFAULT: the loader's pre-flight exempts defaulted
+    -- columns from its "declared but absent from the frame" check, so a
+    -- default would quietly excuse the generator from ever emitting this.
+    components_populated    BOOLEAN      NOT NULL,
 
     CONSTRAINT tp_prob_range CHECK (
         (p_convert         IS NULL OR p_convert         BETWEEN 0 AND 1) AND
@@ -97,7 +123,17 @@ CREATE TABLE truth.truth_order_probability (
         (p_rto_final       IS NULL OR p_rto_final       BETWEEN 0 AND 1)),
     -- The pre-checkout score must be frozen BEFORE the shock is known, so both
     -- exist together or neither does.
-    CONSTRAINT tp_rto_pair   CHECK ((p_rto_precheckout IS NULL) = (p_rto_final IS NULL))
+    CONSTRAINT tp_rto_pair   CHECK ((p_rto_precheckout IS NULL) = (p_rto_final IS NULL)),
+    -- The flag is not a label the loader can get wrong independently of the data:
+    -- every sampled session carries a COD trace, and only sampled sessions do.
+    CONSTRAINT tp_components_flag CHECK (
+        components_populated = (logit_cod_components IS NOT NULL)),
+    -- An RTO trace exists exactly where the row was sampled AND an RTO logit was
+    -- computed. Stated as an equality rather than an implication so neither a
+    -- missing trace nor an orphaned one can slip through.
+    CONSTRAINT tp_components_rto CHECK (
+        (logit_rto_components IS NOT NULL)
+        = (components_populated AND p_rto_precheckout IS NOT NULL))
 );
 
 -- ============================================================================

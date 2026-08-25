@@ -95,6 +95,7 @@ def write_truth(
     auc_ceiling: float,
     ledger=None,
     hypotheses: dict | None = None,
+    truth_sampling: dict | None = None,
 ) -> dict:
     """Module 21 — ``_truth.json``. The DERIVED figures are the authority.
 
@@ -179,6 +180,11 @@ def write_truth(
         # standalone validation run can perform a REAL CAL-09 rather than
         # comparing params.yaml to a copy of itself.
         "coefficient_ledger": ledger.as_dict() if ledger is not None else {},
+        # Decision A45. Provenance for the component-trace audit sample: which
+        # strata were drawn, how many rows landed, and the worst error between a
+        # trace and the probability it decomposes. Recorded here so the sample is
+        # reproducible and its fidelity is a published number, not a claim.
+        "component_trace_sample": truth_sampling or {},
         "achieved": {
             "n_orders": metrics.n_orders,
             "cod_share": metrics.cod_share,

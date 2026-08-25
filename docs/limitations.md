@@ -268,8 +268,13 @@ P(COD) across their sessions (spec §3.13). **3,284 of 55,000 customers (6.0%)
 open no checkout session inside the 90-day window**, so that mean has no
 denominator and the column is NULL for them.
 
-This is the same rule as decision A18 and limitation L2: a rate with an empty
-denominator is NULL, never imputed. Imputing the population COD share would have
+This is the same rule as decision A18 and limitation **L2** (decision **A30**,
+`pit_avg_order_value`): **a statistic with no data behind it stays NULL.** The
+two cases are the same pattern in two different tables — an average with an empty
+denominator, discovered the same way, resolved the same way. Neither is imputed
+and neither is dropped; both are declared NULL and documented here.
+
+Imputing the population COD share would have
 invented 3,284 fictitious COD-average customers *inside the truth table* — the
 one place in the project where a fabricated value cannot be caught by anything
 downstream, because the truth table is what everything else is checked against.
@@ -284,31 +289,46 @@ picks the second.
 
 ---
 
-## L12 — The per-term logit traces are not produced
+## L12 — The per-term logit traces cover a 2,000-session audit sample, not the whole table
 
 `truth_order_probability.logit_cod_components` and `logit_rto_components` are
 declared JSONB in the schema (spec §3.13: "every additive term in the logit, by
-name") and are **entirely NULL** in the built dataset.
+name"). They are populated for **1,995 of 155,000 sessions** (1.29%) — a
+documented stratified audit sample — and NULL for the rest. Decision **A45**.
 
-The day loop assembles each logit in two halves — a static block computed once
-per session, plus a per-day dynamic block — because it runs ~100 times inside the
-calibration solve and a per-term trace would need it to materialise roughly 25
-arrays per session per day. The columns were left NULL rather than filled with
-something that merely resembles a trace.
+**Why not all of them.** These columns exist to make GT-01 auditable: a Phase 5
+reviewer opens *one* order and reads every additive term that produced its
+probability. That is a lookup, never a scan. Populating all 155,000 sessions
+costs roughly **190 MB of JSONB for a diagnostic that is never run in bulk**, so
+full population was rejected on cost against zero analytical gain.
 
-**This is a registered gap, not a hidden one.** `scripts/02_load_postgres.py`
-blocks the load over any declared column that is entirely NULL; these two are the
-single entry in its `KNOWN_EMPTY` exception list, so every load prints them.
+**Why not zero of them.** Because the alternative on offer was shipping a
+declared-but-empty column indefinitely, which is the worst of the three options —
+it looks like data and is not.
 
-**What is not lost.** Every coefficient is still recorded, by name and by block,
-in the runtime `CoefficientLedger` and persisted into `data/truth/_truth.json`
-(test CAL-09). What is missing is the *per-row* decomposition, which is a
-diagnostic convenience — being able to explain a single order's score — not an
-input to any test.
+**The sample.** 500 each of: a random draw across all sessions; COD orders that
+RTO'd; prepaid orders that RTO'd; and top-decile-`p_rto_precheckout` orders that
+delivered. The last three are the cases anyone would actually inspect. Strata
+overlap is de-duplicated, so the realised count is 1,995 rather than exactly
+2,000, and is recorded in `data/truth/_truth.json` under `component_trace_sample`
+rather than assumed. 1,836 of them carry an RTO trace; the remainder produced no
+order, so there is no RTO logit to decompose.
 
-**Open for a ruling.** Populating them is mechanical (`LogitAssembler.
-component_rows()` already exists and is written for exactly this) but would add
-roughly 190 MB across 155,000 rows × 2 columns. The alternatives are: populate
-them, populate them for a documented sample, or drop the two columns from the
-DDL. Shipping a declared-but-empty column indefinitely is the worst of the three.
+**The NULLs are stated, not ambiguous.** `components_populated` (BOOLEAN NOT
+NULL) says per row whether a trace should be there, and two CHECK constraints
+tie the flag to the data so it cannot drift from it. Without that column, "no
+components" and "not sampled" would be indistinguishable — the exact defect class
+decision A44 was written about.
+
+**Consequence for Phase 3+.** Any query that joins to these columns must filter
+on `components_populated`, or accept that ~98.7% of rows return NULL. They are a
+diagnostic convenience — explaining a single order's score — and are an input to
+no test. Every coefficient is still recorded, by name and by block, in the
+runtime `CoefficientLedger` and persisted into `_truth.json` (test CAL-09);
+what the unsampled rows lack is only the *per-row* decomposition.
+
+**Fidelity.** The trace is reconstructed after the day loop, because three of the
+four strata are defined by outcomes. The generator re-derives each sampled
+probability from its own trace and refuses to store one that disagrees; the
+realised worst error is 8.88e-16.
 

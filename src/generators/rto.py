@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.models.logit import CoefficientLedger, logistic
+from src.models.logit import CoefficientLedger, logistic, sum_terms
 
 BLOCK = "rto_model"
 
@@ -75,7 +75,7 @@ def record_dynamic_coefficients(params, ledger: CoefficientLedger) -> dict[str, 
     }
 
 
-def stage1_dynamic(
+def stage1_dynamic_terms(
     coefficients: dict[str, float],
     pit_rto_rate_shrunk: np.ndarray,
     pit_is_new: np.ndarray,
@@ -86,8 +86,8 @@ def stage1_dynamic(
     is_month_end: np.ndarray,
     rto_prior: float,
     cod_prior: float,
-) -> np.ndarray:
-    """The part of the Stage-1 logit that changes as history accumulates.
+) -> dict[str, np.ndarray]:
+    """The Stage-1 terms that change as history accumulates, by name.
 
     Decision A39: both history-rate terms are **centred on their declared
     priors**, so a customer with no history contributes a deviation of zero and
@@ -103,15 +103,42 @@ def stage1_dynamic(
     the RTO logit, for no reason. Same variable, same treatment.
     """
     cod = is_cod.astype(np.float64)
-    return (
-        coefficients["pit_rto_rate_shrunk"] * (pit_rto_rate_shrunk - rto_prior)
-        + coefficients["is_new_customer"] * pit_is_new.astype(np.float64)
-        + coefficients["log1p_orders_delivered"] * np.log1p(pit_orders_delivered)
-        + coefficients["pit_cod_share"] * np.nan_to_num(pit_cod_share - cod_prior, nan=0.0)
-        + coefficients["is_cod"] * cod
-        + coefficients["paid_via_switch"] * paid_via_switch.astype(np.float64)
-        + coefficients["month_end_x_cod"] * is_month_end * cod
-    )
+    return {
+        "pit_rto_rate_shrunk":
+            coefficients["pit_rto_rate_shrunk"] * (pit_rto_rate_shrunk - rto_prior),
+        "is_new_customer":
+            coefficients["is_new_customer"] * pit_is_new.astype(np.float64),
+        "log1p_orders_delivered":
+            coefficients["log1p_orders_delivered"] * np.log1p(pit_orders_delivered),
+        "pit_cod_share":
+            coefficients["pit_cod_share"]
+            * np.nan_to_num(pit_cod_share - cod_prior, nan=0.0),
+        # THE planted coefficient. +1.60, and one additive term among ~25.
+        "is_cod": coefficients["is_cod"] * cod,
+        "paid_via_switch":
+            coefficients["paid_via_switch"] * paid_via_switch.astype(np.float64),
+        "month_end_x_cod":
+            coefficients["month_end_x_cod"] * is_month_end * cod,
+    }
+
+
+def stage1_dynamic(
+    coefficients: dict[str, float],
+    pit_rto_rate_shrunk: np.ndarray,
+    pit_is_new: np.ndarray,
+    pit_orders_delivered: np.ndarray,
+    pit_cod_share: np.ndarray,
+    is_cod: np.ndarray,
+    paid_via_switch: np.ndarray,
+    is_month_end: np.ndarray,
+    rto_prior: float,
+    cod_prior: float,
+) -> np.ndarray:
+    """Sum of :func:`stage1_dynamic_terms`."""
+    return sum_terms(stage1_dynamic_terms(
+        coefficients, pit_rto_rate_shrunk, pit_is_new, pit_orders_delivered,
+        pit_cod_share, is_cod, paid_via_switch, is_month_end, rto_prior, cod_prior,
+    ))
 
 
 def record_shock_coefficients(params, ledger: CoefficientLedger) -> dict[str, float]:
@@ -129,14 +156,14 @@ def record_shock_coefficients(params, ledger: CoefficientLedger) -> dict[str, fl
     }
 
 
-def post_dispatch_shock(
+def post_dispatch_shock_terms(
     coefficients: dict[str, float],
     courier_reliability_z: np.ndarray,
     attempt_delay_days: np.ndarray,
     seller_dispatch_late: np.ndarray,
     nu: np.ndarray,
-) -> np.ndarray:
-    """Stage 2 — the shock that exists only after the parcel moves.
+) -> dict[str, np.ndarray]:
+    """Stage 2 — the shock that exists only after the parcel moves, by name.
 
     ``ν`` dominates: at sd 0.85 it is larger than any single deterministic term
     here. That is deliberate. It is the customer's day, the missed phone call, the
@@ -147,12 +174,29 @@ def post_dispatch_shock(
     d2 = coefficients["attempt_delay_days"]
     d3 = coefficients["seller_dispatch_late"]
 
-    return (
-        d1 * (-courier_reliability_z)          # LOW reliability raises risk
-        + d2 * attempt_delay_days
-        + d3 * seller_dispatch_late.astype(np.float64)
-        + nu
-    )
+    return {
+        # LOW reliability raises risk
+        "courier_reliability_z_neg": d1 * (-courier_reliability_z),
+        "attempt_delay_days": d2 * attempt_delay_days,
+        "seller_dispatch_late": d3 * seller_dispatch_late.astype(np.float64),
+        # The irreducible term. Larger than any deterministic driver here, and
+        # the reason a checkout-time model cannot reach 0.95.
+        "nu": np.asarray(nu, dtype=np.float64),
+    }
+
+
+def post_dispatch_shock(
+    coefficients: dict[str, float],
+    courier_reliability_z: np.ndarray,
+    attempt_delay_days: np.ndarray,
+    seller_dispatch_late: np.ndarray,
+    nu: np.ndarray,
+) -> np.ndarray:
+    """Sum of :func:`post_dispatch_shock_terms`."""
+    return sum_terms(post_dispatch_shock_terms(
+        coefficients, courier_reliability_z, attempt_delay_days,
+        seller_dispatch_late, nu,
+    ))
 
 
 def delivery_timeline(

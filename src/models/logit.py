@@ -245,6 +245,26 @@ class LogitAssembler:
         return values
 
 
+def sum_terms(terms: dict[str, np.ndarray]) -> np.ndarray:
+    """Sum named contributions in insertion order, without requiring an intercept.
+
+    Used by the model blocks whose intercept is the value the calibrator solves,
+    so the caller adds it separately.
+
+    Accumulating into a zero array reproduces the left-to-right evaluation order
+    of the equivalent inline expression exactly. That is what makes it safe to
+    split a summed expression into named terms: the component trace and the
+    generator share one implementation, and the split moves no bits (decision
+    A45). ``0.0 + a`` is exact in IEEE-754, so the leading zero costs nothing.
+    """
+    if not terms:
+        raise LogitError("sum_terms received no terms.")
+    total = np.zeros(np.shape(next(iter(terms.values()))), dtype=np.float64)
+    for contribution in terms.values():
+        total += contribution
+    return total
+
+
 def logistic(x: np.ndarray | float) -> np.ndarray:
     """Numerically stable logistic function.
 

@@ -6,7 +6,7 @@ ifeq ($(OS),)
 PY := .venv/bin/python
 endif
 
-.PHONY: help setup test dev generate dryrun validate load all clean
+.PHONY: help setup test dev generate dryrun validate load verify baseline all clean
 
 # Every target below is a thin wrapper. README documents the direct `python
 # scripts/...` invocation for each, so nothing is blocked on having make installed.
@@ -17,9 +17,10 @@ help:
 	@echo "make dev       - modules 02-07 at 5,000-order dev scale"
 	@echo "make generate  - modules 02-07 at full scale  [08+ NOT BUILT]"
 	@echo "make dryrun    - parse sql/*.sql with sqlglot; no server needed"
-	@echo "make validate  - run the validation suite     [BLOCKED]"
-	@echo "make load      - load PostgreSQL + REVOKE     [BLOCKED]"
-	@echo "make all       - generate -> validate -> load [BLOCKED]"
+	@echo "make load      - load PostgreSQL + REVOKE (DROPS both schemas)"
+	@echo "make verify    - LK-01, LK-05, DQ-01, FK and CHECK against the server"
+	@echo "make validate  - run the validation suite     -> reports/"
+	@echo "make all       - generate -> load -> verify -> validate"
 
 setup:
 	python -m venv .venv
@@ -30,8 +31,8 @@ test:
 	$(PY) -m pytest
 
 # --- built -----------------------------------------------------------------
-# Modules 02-07 only: dates, geography, sellers, products, customers + latents,
-# pre-window history. Ends with the Stage-2 checkpoint.
+# Modules 02-21: dimensions, latents, pre-window history, sessions, the
+# decision-A1 day loop, RTO reasons, economics, roll-up and the truth file.
 
 dev:
 	$(PY) scripts/01_generate.py --dev
@@ -42,23 +43,28 @@ generate:
 dryrun:
 	$(PY) scripts/02_load_postgres.py --dry-run
 
-# --- gated targets ---------------------------------------------------------
-# Modules 08-23 are not written. validate and load read tables that do not exist
-# yet, so they refuse rather than failing halfway through.
-
-BLOCKED = @echo "BLOCKED: generation modules 08-23 are not built yet." && \
-	echo "Built: 02 dates, 03 geography, 04 sellers, 05 products," && \
-	echo "       06 customers + latents, 07 pre-window history." && \
-	echo "Next:  08 sessions onward. A26 fixes the 11a/11b/11c ordering." && \
-	echo "See docs/decision_register.md." && exit 1
-
-validate:
-	$(BLOCKED)
+# --- database-backed --------------------------------------------------------
+# `load` DROPS and recreates both schemas, so it refuses without --force.
+# `verify` must run AFTER `load`: it publishes reports/database_checks.json,
+# which `validate` reads to report LK-01, LK-05 and DQ-01 as real results
+# instead of SKIPs. That file is gated on BOTH the dataset hash and the DDL
+# hash, so running these out of order degrades to SKIP rather than lying.
 
 load:
-	$(BLOCKED)
+	$(PY) scripts/02_load_postgres.py --force
 
-all: generate validate load
+verify:
+	$(PY) scripts/04_verify_database.py
+
+# Writes the DQ-01 baseline. Run it, regenerate, then `make verify` -- a
+# manifest compared against the run that wrote it proves nothing.
+baseline:
+	$(PY) scripts/04_verify_database.py --manifest
+
+validate:
+	$(PY) scripts/03_validate.py
+
+all: generate load verify validate
 
 clean:
 	rm -rf data/raw/* data/processed/* data/validation/* reports/figures/*

@@ -50,7 +50,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from src.models.logit import CoefficientLedger, LogitAssembler
+from src.models.logit import CoefficientLedger, LogitAssembler, sum_terms
 
 COD_BLOCK = "cod_model"
 CONVERSION_BLOCK = "conversion_model"
@@ -117,12 +117,17 @@ def session_context(
     }
 
 
-def cod_static(params, ctx: dict, ledger: CoefficientLedger) -> np.ndarray:
-    """The COD-intent logit minus its intercept and its point-in-time terms.
+def cod_static_terms(params, ctx: dict, ledger: CoefficientLedger) -> dict[str, np.ndarray]:
+    """Every static COD term, by name. :func:`cod_static` is the sum of these.
 
     The inverted-U on order value (+0.28 linear, −0.12 squared) lives here: it is
     what makes H4 testable, with COD rising through the mid basket sizes and
     falling again as affluence takes over above roughly ₹3,200.
+
+    Returning the named terms rather than only their sum is what lets the
+    component trace (decision A45) be *reconstructed from the generator itself*
+    instead of reimplemented alongside it. A second implementation would be free
+    to drift; this one cannot.
     """
     c = params.require(f"{COD_BLOCK}.coefficients")
     centre = params.require("distributions.centering")
@@ -157,7 +162,12 @@ def cod_static(params, ctx: dict, ledger: CoefficientLedger) -> np.ndarray:
     a.add_categorical("category", c["category"], ctx["category"])
     a.add_numeric("is_month_end", c["is_month_end"], ctx["is_month_end"])
 
-    return _sum(a)
+    return a.components()
+
+
+def cod_static(params, ctx: dict, ledger: CoefficientLedger) -> np.ndarray:
+    """The COD-intent logit minus its intercept and its point-in-time terms."""
+    return sum_terms(cod_static_terms(params, ctx, ledger))
 
 
 def conversion_static(params, ctx: dict, ledger: CoefficientLedger) -> np.ndarray:
@@ -179,10 +189,10 @@ def conversion_static(params, ctx: dict, ledger: CoefficientLedger) -> np.ndarra
     a.add_numeric("device_web", c["device_web"], (ctx["device_type"] == "WEB").astype(float))
     a.add_numeric("cart_size_ge3", c["cart_size_ge3"], (ctx["cart_size"] >= 3).astype(float))
 
-    return _sum(a)
+    return sum_terms(a.components())
 
 
-def rto_static(params, ctx: dict, ledger: CoefficientLedger) -> np.ndarray:
+def rto_static_terms(params, ctx: dict, ledger: CoefficientLedger) -> dict[str, np.ndarray]:
     """Stage-1 RTO minus its intercept, its point-in-time terms and ``is_cod``.
 
     ``address_completeness`` at **−1.40** is the second-strongest driver here and
@@ -217,7 +227,12 @@ def rto_static(params, ctx: dict, ledger: CoefficientLedger) -> np.ndarray:
                   ctx["estimated_delivery_days"] - float(centre["est_delivery_days_center"]))
     a.add_categorical("category", c["category"], ctx["category"])
 
-    return _sum(a)
+    return a.components()
+
+
+def rto_static(params, ctx: dict, ledger: CoefficientLedger) -> np.ndarray:
+    """Stage-1 RTO minus its intercept, its point-in-time terms and ``is_cod``."""
+    return sum_terms(rto_static_terms(params, ctx, ledger))
 
 
 def record_dynamic(params, block: str, terms: tuple[str, ...],
@@ -225,6 +240,42 @@ def record_dynamic(params, block: str, terms: tuple[str, ...],
     """Record the per-day coefficients once and return them for reuse in the loop."""
     coefficients = params.require(f"{block}.coefficients")
     return {t: ledger.record(block, t, coefficients[t]) for t in terms}
+
+
+def cod_dynamic_terms(
+    coefficients: dict[str, float],
+    pit_cod_share: np.ndarray,
+    prepaid_success: np.ndarray,
+    is_new: np.ndarray,
+    orders_delivered: np.ndarray,
+    payment_failure_rate: np.ndarray,
+    cod_prior: float,
+    payment_failure_prior: float,
+) -> dict[str, np.ndarray]:
+    """The COD terms that move as history accumulates, by name.
+
+    Decision A39: ``pit_cod_share`` is centred on the declared prior, so a
+    historyless customer contributes a deviation of zero rather than sitting at
+    the never-used-COD end of the scale.
+
+    ``payment_failure_rate`` is deliberately left un-centred and is flagged for a
+    ruling — it is the one remaining history rate where NULL still means "zero",
+    though at +1.10 × 0.175 the effect is ~0.19 on the logit rather than 1.358.
+    """
+    return {
+        "pit_cod_share":
+            coefficients["pit_cod_share"]
+            * np.nan_to_num(pit_cod_share - cod_prior, nan=0.0),
+        "log1p_prepaid_success":
+            coefficients["log1p_prepaid_success"] * np.log1p(prepaid_success),
+        "is_new_customer":
+            coefficients["is_new_customer"] * is_new.astype(np.float64),
+        "log1p_orders_delivered":
+            coefficients["log1p_orders_delivered"] * np.log1p(orders_delivered),
+        "payment_failure_rate":
+            coefficients["payment_failure_rate"]
+            * np.nan_to_num(payment_failure_rate - payment_failure_prior, nan=0.0),
+    }
 
 
 def cod_dynamic(
@@ -237,35 +288,14 @@ def cod_dynamic(
     cod_prior: float,
     payment_failure_prior: float,
 ) -> np.ndarray:
-    """The COD terms that move as history accumulates.
-
-    Decision A39: ``pit_cod_share`` is centred on the declared prior, so a
-    historyless customer contributes a deviation of zero rather than sitting at
-    the never-used-COD end of the scale.
-
-    ``payment_failure_rate`` is deliberately left un-centred and is flagged for a
-    ruling — it is the one remaining history rate where NULL still means "zero",
-    though at +1.10 × 0.175 the effect is ~0.19 on the logit rather than 1.358.
-    """
-    return (
-        coefficients["pit_cod_share"] * np.nan_to_num(pit_cod_share - cod_prior, nan=0.0)
-        + coefficients["log1p_prepaid_success"] * np.log1p(prepaid_success)
-        + coefficients["is_new_customer"] * is_new.astype(np.float64)
-        + coefficients["log1p_orders_delivered"] * np.log1p(orders_delivered)
-        + coefficients["payment_failure_rate"]
-        * np.nan_to_num(payment_failure_rate - payment_failure_prior, nan=0.0)
-    )
+    """Sum of :func:`cod_dynamic_terms` — what the day loop adds to the logit."""
+    return sum_terms(cod_dynamic_terms(
+        coefficients, pit_cod_share, prepaid_success, is_new, orders_delivered,
+        payment_failure_rate, cod_prior, payment_failure_prior,
+    ))
 
 
 # ---------------------------------------------------------------------------
-
-
-def _sum(assembler: LogitAssembler) -> np.ndarray:
-    """Sum the terms without requiring an intercept — the intercept is the variable."""
-    total = np.zeros(assembler.n_rows, dtype=np.float64)
-    for contribution in assembler.components().values():
-        total += contribution
-    return total
 
 
 def _log_value(order_value: np.ndarray, centre: dict) -> np.ndarray:

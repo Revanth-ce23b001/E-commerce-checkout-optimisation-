@@ -48,21 +48,67 @@ LOAD_ORDER = [
 TRUTH_TABLES = {"truth_customer_latent", "truth_order_probability"}
 
 # Decision A44. A declared column that is entirely NULL is a generator defect and
-# the pre-flight blocks the load over it. These two are the ONE registered
-# exception: they are a KNOWN, documented gap, not a silent one. The day loop
-# assembles each logit in two halves (a static block computed once, plus a
-# per-day dynamic block) for speed, so a faithful per-term trace would need the
-# loop to materialise ~25 arrays per session per day. They are left NULL rather
-# than filled with something that merely looks like a trace.
+# the pre-flight blocks the load over it. The parquet layer enforces nothing, so
+# this is the first place a never-populated column can be caught.
 #
-# Registering them here rather than deleting the check means every single load
-# prints the gap. An exception that is invisible is indistinguishable from a bug.
-KNOWN_EMPTY = {
-    ("truth_order_probability", "logit_cod_components"): "per-term trace not produced (spec 3.13)",
-    ("truth_order_probability", "logit_rto_components"): "per-term trace not produced (spec 3.13)",
+# There are now no registered all-NULL columns. The two that used to be here --
+# logit_cod_components and logit_rto_components -- were populated under decision
+# A45 for a documented 2,000-session audit sample. The dictionary stays, because
+# the mechanism is the point: an exception that is invisible is indistinguishable
+# from a bug, and the next gap must be registered here to load at all.
+KNOWN_EMPTY: dict[tuple[str, str], str] = {}
+
+# Decision A45. Columns that are populated for a DOCUMENTED SUBSET rather than
+# for every row. Each names the BOOLEAN column that states, per row, whether the
+# value should be there.
+#
+# This is a stricter check than KNOWN_EMPTY, not a softer one. A registered
+# all-NULL column only has to be null; these have to be null in exactly the rows
+# the flag says, and non-null in exactly the rows it says. So the sample silently
+# collapsing to zero rows -- the realistic failure, and one no all-NULL check
+# would catch once a single row was populated -- fails the load.
+PARTIAL_BY_DESIGN = {
+    ("truth_order_probability", "logit_cod_components"): (
+        "components_populated", "A45 audit sample; populated wherever the flag is true"),
+    ("truth_order_probability", "logit_rto_components"): (
+        "components_populated", "A45 audit sample; populated where the flag is true "
+        "AND the session produced an order"),
 }
 
 
+def check_partial(name: str, frame) -> tuple[list[str], list[str]]:
+    """Verify each partially-populated column against the flag that explains it.
+
+    Returns (problems, notes). A problem blocks the load.
+    """
+    problems, notes = [], []
+    for (table, column), (flag, reason) in PARTIAL_BY_DESIGN.items():
+        if table != name or column not in frame.columns:
+            continue
+        if flag not in frame.columns:
+            problems.append(
+                f"{column} is declared partial but its flag {flag} is absent")
+            continue
+        present = frame[column].notna()
+        flagged = frame[flag].fillna(False).astype(bool)
+        if not present.any():
+            problems.append(
+                f"{column} is 100% NULL -- the {flag} sample produced nothing")
+            continue
+        # The RTO trace is a subset of the flag (no order, no RTO logit), so the
+        # rule is containment; the COD trace must match the flag exactly.
+        if (present & ~flagged).any():
+            problems.append(
+                f"{column} is populated on {(present & ~flagged).sum():,} row(s) "
+                f"where {flag} is false")
+        if column.startswith("logit_cod") and (flagged & ~present).any():
+            problems.append(
+                f"{column} is NULL on {(flagged & ~present).sum():,} row(s) "
+                f"where {flag} is true")
+        notes.append(
+            f"{column}: {int(present.sum()):,} of {len(frame):,} rows populated "
+            f"({present.mean():.3%}) -- {reason}")
+    return problems, notes
 
 
 # ---------------------------------------------------------------------------
@@ -266,8 +312,11 @@ def load(env: dict) -> int:
     for name in LOAD_ORDER:
         frames[name] = pd.read_parquet(parquet[name])
         found, registered = preflight(connection, name, frames[name])
-        defects.extend(f"   {name}: {problem}" for problem in found)
+        partial_problems, partial_notes = check_partial(name, frames[name])
+        defects.extend(f"   {name}: {problem}"
+                       for problem in found + partial_problems)
         notes.extend(f"   KNOWN GAP  {name}.{note}" for note in registered)
+        notes.extend(f"   BY DESIGN  {name}.{note}" for note in partial_notes)
     if defects:
         for line in defects:
             print(line)
@@ -280,7 +329,7 @@ def load(env: dict) -> int:
     for note in notes:
         print(note)
     print(f"   {len(LOAD_ORDER)} tables: no absent columns, "
-          f"{len(notes)} registered all-NULL column(s), 0 unregistered")
+          f"0 unregistered all-NULL column(s)")
     print("\nCOPY:")
     print(f"   {'table':<34}{'parquet':>10}{'loaded':>10}   match")
     mismatches = []

@@ -978,9 +978,40 @@ leakage_guard:
 # -----------------------------------------------------------------------------
 seed:
   master: 20260115
+  # APPEND ONLY (CLAUDE.md invariant 11). `truth_sampling` was appended for
+  # decision A45; SeedSequence derives each child from its POSITION, so adding a
+  # name at the end leaves every existing stream byte-identical. DQ-01 proves it:
+  # the fct_order hash is unchanged across the append.
   substreams: [date, geography, seller, product, customer, latent, history,
                session, cod, payment, conversion, order, cancel, rto,
-               delivery, reason, economics]
+               delivery, reason, economics, truth_sampling]
+
+# -----------------------------------------------------------------------------
+# TRUTH SAMPLING - decision A45
+#
+# Which sessions get a per-term logit trace in truth_order_probability. These
+# columns exist to make GT-01 auditable: a Phase 5 reviewer opens ONE order and
+# reads every additive term that produced its probability. That is a lookup, not
+# a scan, so the sample is 2,000 sessions rather than all 155,000 - full
+# population would cost ~190 MB of JSONB for a query nobody runs in bulk.
+#
+# Three of the four strata are the cases a reviewer would actually open: a COD
+# order that came back, a prepaid order that came back, and an order the
+# pre-checkout score called risky that arrived safely. The fourth is an unbiased
+# random draw, so the sample is not only its own tail.
+#
+# Strata may overlap; the union is de-duplicated, so the realised count is at or
+# just below 2,000 and is recorded in _truth.json rather than assumed.
+# -----------------------------------------------------------------------------
+truth_sampling:
+  strata:
+    random_sessions:      500      # unbiased draw across ALL sessions, orders or not
+    cod_rto:              500      # COD, shipped, resolved, returned
+    prepaid_rto:          500      # prepaid, shipped, resolved, returned
+    high_risk_delivered:  500      # top-decile p_rto_precheckout that DELIVERED
+  # Defines "high risk" for the fourth stratum: the quantile of
+  # p_rto_precheckout, measured among delivered orders only.
+  high_risk_quantile: 0.90
 
 # -----------------------------------------------------------------------------
 # CALIBRATION STAMP - machine-written by the calibrator. Never hand-edit.

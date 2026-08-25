@@ -23,6 +23,7 @@ sys.path.insert(0, str(REPO_ROOT))
 import pandas as pd  # noqa: E402
 
 from scripts.load_helpers import connect, read_env  # noqa: E402
+from src.validation.dataset_hash import ddl_hash  # noqa: E402
 from src.validation.dataset_hash import order_hash as _canonical_hash  # noqa: E402
 
 MANIFEST_DIR = REPO_ROOT / "data" / "manifests"
@@ -292,12 +293,18 @@ def main(argv=None) -> int:
         print(f"       {detail}")
 
     # Publish, so scripts/03_validate.py can report these three as real results
-    # instead of SKIPs. The dataset hash goes in with them: without it a stale
-    # file would silently turn a SKIP into a fabricated PASS, which is the same
+    # instead of SKIPs. BOTH hashes go in with them: without them a stale file
+    # would silently turn a SKIP into a fabricated PASS, which is the same
     # failure mode as a manifest compared against itself.
+    #
+    # The DDL hash is not redundant. Decision A45 changed the schema while
+    # leaving fct_order byte-identical on purpose, so a data-only guard would
+    # have passed a result describing the previous schema. And LK-01 is a
+    # statement about a VIEW -- the data hash says nothing about it at all.
     RESULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
     RESULTS_FILE.write_text(json.dumps({
         "fct_order_sha256": order_hash(),
+        "ddl_sha256": ddl_hash(),
         "checks": {test_id: {"passed": bool(passed), "detail": detail}
                    for test_id, _, passed, detail in outcomes},
     }, indent=2), encoding="utf-8")

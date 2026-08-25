@@ -1,5 +1,6 @@
 {
   "fct_order_sha256": "49b066f06ed1fae63fb5ef65c88cbf5c1199f86c9267936d869b590357cd2aee",
+  "ddl_sha256": "b9db5f0f8cd92729ff9d755da15283d7ed47f23c22bcfe400c7abdcddc8fa56f",
   "checks": {
     "LK-01": {
       "passed": true,
@@ -15,7 +16,7 @@
     },
     "CONSTR": {
       "passed": true,
-      "detail": "102 check predicates re-evaluated row by row, 0 violations"
+      "detail": "104 check predicates re-evaluated row by row, 0 violations"
     }
   }
 }

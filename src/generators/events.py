@@ -112,26 +112,50 @@ def build_delivery_events(
     return events[DELIVERY_COLUMNS]
 
 
-def build_truth_probabilities(sessions: pd.DataFrame, extra: dict) -> pd.DataFrame:
+def build_truth_probabilities(sessions: pd.DataFrame, extra: dict,
+                              traces: pd.DataFrame | None = None) -> pd.DataFrame:
     """One row per SESSION. 🔴 HIDDEN — schema ``truth``, REVOKEd from ``analyst``.
 
     ``p_rto_precheckout`` is the AUC ceiling: the RTO probability from Stage-1/2
     information alone, frozen before any Stage-4 fact exists. No risk model
     reading safe features can beat it. The gap to ``p_rto_final`` is the
     post-dispatch shock — the honest source of the ceiling.
+
+    ``traces`` carries the decision-A45 audit sample: per-term logit
+    decompositions for 2,000 stratified sessions. The other ~153,000 rows keep
+    NULL components and ``components_populated = FALSE``, so the absence is
+    *stated* rather than ambiguous. Full population was rejected at ~190 MB for a
+    diagnostic that is only ever read one order at a time
+    (:mod:`src.generators.components`).
     """
-    return pd.DataFrame({
+    frame = pd.DataFrame({
         "session_id": sessions["session_id"].to_numpy(),
         "p_convert": np.round(extra["p_convert"], 5),
         "p_cod_intent": np.round(extra["p_cod_intent"], 5),
-        # Component traces are the JSONB columns in the truth schema. Left NULL
-        # here rather than faked: the day loop assembles the logit in two halves
-        # (static + per-day dynamic) for speed, so a faithful per-term trace would
-        # need the loop to materialise ~25 arrays per day. Recorded as a gap
-        # rather than filled with something that only looks like a trace.
         "logit_cod_components": None,
         "p_rto_precheckout": np.round(extra["p_rto_precheckout"], 5),
         "p_rto_final": np.round(extra["p_rto_final"], 5),
         "logit_rto_components": None,
         "post_dispatch_shock": np.round(extra["shock"], 4),
+        # NOT NULL in the DDL. Every row states whether it carries a trace, which
+        # is what turns 153,000 NULLs from "unexplained gap" into "not sampled".
+        "components_populated": False,
     })
+    if traces is None or traces.empty:
+        return frame
+
+    position = pd.Index(frame["session_id"]).get_indexer(traces["session_id"])
+    if (position < 0).any():
+        raise ValueError(
+            "Component trace references a session_id absent from "
+            "truth_order_probability. The audit sample must be drawn from the "
+            "session grain it annotates."
+        )
+    for column in ("logit_cod_components", "logit_rto_components",
+                   "components_populated"):
+        frame[column] = frame[column].astype(object)
+        frame.iloc[position, frame.columns.get_loc(column)] = (
+            traces[column].to_numpy()
+        )
+    frame["components_populated"] = frame["components_populated"].astype(bool)
+    return frame

@@ -30,7 +30,8 @@
     "ground_truth",
     "leakage_guard",
     "seed",
-    "calibration"
+    "calibration",
+    "truth_sampling"
   ],
   "$defs": {
     "target": {
@@ -1417,6 +1418,50 @@
         "vol_02b_conversion_consistency_tol": {
           "type": "number",
           "exclusiveMinimum": 0
+        }
+      }
+    },
+    "truth_sampling": {
+      "description": "Decision A45. Which sessions carry a per-term logit trace in truth_order_probability. A stratified audit sample, not the full population.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "strata",
+        "high_risk_quantile"
+      ],
+      "properties": {
+        "strata": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "random_sessions",
+            "cod_rto",
+            "prepaid_rto",
+            "high_risk_delivered"
+          ],
+          "properties": {
+            "random_sessions": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "cod_rto": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "prepaid_rto": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "high_risk_delivered": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "high_risk_quantile": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 1
         }
       }
     }

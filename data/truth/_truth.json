@@ -1,9 +1,9 @@
 {
   "run_manifest": {
     "master_seed": 20260115,
-    "params_sha256": "55b26c159584ea9736f036cce986021a5060300fb56a87ac035043bbcb0527bc",
-    "dgp_sha256": "a188db118d8b1d46668ea2558abdca06f2a79ef34e025a12a12176facadc37bf",
-    "generated_at_utc": "2026-08-24T20:00:56.662867+00:00",
+    "params_sha256": "40327eb7aec2cf00ac4179f4421b6a514269460c7b38bd8900594a5e8b9c7663",
+    "dgp_sha256": "ba17a1622d923d2d006b2e008172d4c5bf44e6369c1c0779750e48b56aa48a7c",
+    "generated_at_utc": "2026-08-25T17:37:18.283916+00:00",
     "generator_version": "2.0.0"
   },
   "calibrated_levels": {
@@ -154,6 +154,31 @@
       "cart_size_ge3": -0.12,
       "pit_is_new_customer": -0.35
     }
+  },
+  "component_trace_sample": {
+    "rule": "decision A45 - stratified audit sample, not full population",
+    "target_per_stratum": {
+      "random_sessions": 500,
+      "cod_rto": 500,
+      "prepaid_rto": 500,
+      "high_risk_delivered": 500
+    },
+    "drawn_per_stratum": {
+      "random_sessions": 500,
+      "cod_rto": 500,
+      "prepaid_rto": 500,
+      "high_risk_delivered": 500
+    },
+    "sessions_sampled": 1995,
+    "rto_traces": 1836,
+    "high_risk_quantile": 0.9,
+    "trace_decimals": 6,
+    "max_reconstruction_error": {
+      "p_cod_intent": 3.3306690738754696e-16,
+      "p_rto_precheckout": 4.996003610813204e-16,
+      "p_rto_final": 8.881784197001252e-16
+    },
+    "reconstruction_tolerance": 1e-09
   },
   "achieved": {
     "n_orders": 105605,

@@ -31,6 +31,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from src.config.loader import load_params  # noqa: E402
 from src.config.seeds import spawn_substreams  # noqa: E402
 from src.generators import materialise  # noqa: E402
+from src.generators.components import build_component_traces  # noqa: E402
 from src.generators.conversion import project_checkout_events  # noqa: E402
 from src.generators.events import (  # noqa: E402
     build_delivery_events, build_truth_probabilities,
@@ -151,9 +152,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     customers = rollup_customers(customers, orders, economics)
     hypotheses = _hypotheses(orders, state, metrics)
+
+    # Decision A45. The audit sample can only be drawn AFTER the loop, because
+    # three of its four strata are defined by outcomes. The trace is therefore
+    # reconstructed -- and build_component_traces re-derives every sampled
+    # probability from its own trace and raises if it disagrees with what the day
+    # loop stored. A decomposition nobody checked is worse than an empty column.
+    print("       component traces (A45 audit sample) ...", flush=True)
+    traces, trace_summary = build_component_traces(
+        params, setup, solved, extra, sessions_out, rng.get("truth_sampling"),
+    )
+    worst = max(trace_summary["max_reconstruction_error"].values())
+    print(f"       {trace_summary['sessions_sampled']:,} sessions traced "
+          f"({trace_summary['rto_traces']:,} with an RTO stage); "
+          f"max reconstruction error {worst:.2e}")
+
     truth = write_truth(
         REPO_ROOT / "data" / "truth" / "_truth.json", params, solved, metrics,
-        orders, economics, _auc(params, extra), ledger, hypotheses,
+        orders, economics, _auc(params, extra), ledger, hypotheses, trace_summary,
     )
 
     # ndr_code belongs on fct_delivery_event (spec 3.11), not on fct_order. It is
@@ -166,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     # the live load found it, exactly as it found pit_avg_order_value: a
     # placeholder that the parquet layer was happy to keep forever.
     # Spec 3.13: customer-level mean P(COD) across their sessions.
-    truth_probabilities = build_truth_probabilities(sessions_out, extra)
+    truth_probabilities = build_truth_probabilities(sessions_out, extra, traces)
     propensity = (
         truth_probabilities[["session_id", "p_cod_intent"]]
         .merge(sessions_out[["session_id", "customer_id"]], on="session_id")

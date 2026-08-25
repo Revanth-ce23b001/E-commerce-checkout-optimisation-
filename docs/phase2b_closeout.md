@@ -183,7 +183,7 @@ they disagree with the file.**
 
 ---
 
-## 6. Database verification (tag `phase2b-verified`)
+## 6. Database verification (tags `phase2b-verified`, `phase2b-verified-2`)
 
 PostgreSQL 16.15 in Docker. The DDL had parsed cleanly for weeks; **applying it
 to real rows for the first time found six defects that neither the 42
@@ -222,6 +222,118 @@ Zero are environment-blocked.
 rather than being told about them, and that file carries the hash of the dataset
 it ran against — a stale file reports SKIP, not a fabricated PASS.
 
+### 6a. Re-verification after A45 (`phase2b-verified-2`)
+
+Decision **A45** populated the two component-trace columns for a 2,000-session
+audit sample, which meant regenerating, reloading and re-verifying. Three results
+are worth recording.
+
+**The dataset did not move.** Producing the trace required splitting three summed
+expressions in the day loop into named terms, and appending a `truth_sampling`
+substream to the seed list. Both are supposed to be inert. The `fct_order`
+content hash is byte-identical across the change:
+
+```
+before A45   49b066f06ed1fae63fb5ef65c88cbf5c1199f86c9267936d869b590357cd2aee
+after  A45   49b066f06ed1fae63fb5ef65c88cbf5c1199f86c9267936d869b590357cd2aee
+```
+
+That is the first live evidence for CLAUDE.md invariant 11 — that appending a
+substream leaves every existing stream untouched — and for the claim that
+`sum_terms` reproduces an inline expression exactly rather than approximately.
+
+**Two CHECK constraints were added**, tying `components_populated` to the data it
+describes in both directions, so the flag cannot drift from the traces. The
+constraint count moves 102 → 104, and all 104 are re-evaluated row by row.
+
+**The `KNOWN_EMPTY` registry is now empty.** Its two entries were replaced by
+`PARTIAL_BY_DESIGN`, a stricter check: the column must be non-null in exactly the
+rows the flag claims. The realistic failure — the audit sample silently
+collapsing to a handful of rows — passes an all-NULL check trivially and fails
+this one.
+
+**A fourth result, unplanned.** The staleness guard on
+`reports/database_checks.json` hashed only the dataset — and A45's defining
+property is that the dataset did not change while the schema did. A stale results
+file would therefore have reported "102 check predicates, 0 violations" as
+current evidence about a 104-constraint schema, and LK-01 — a claim about a
+*view*, which exists only in the DDL — would have been reported as verified on no
+evidence at all. The guard now carries `ddl_sha256` alongside the data hash.
+Confirmed by poisoning the DDL hash and watching LK-01, LK-05 and DQ-01 degrade
+to SKIP rather than PASS. Same lesson as A44, one level up: the guard on the
+schema's evidence had itself never been executed against a schema change.
+
+| Check | Before A45 | After A45 |
+|---|---:|---:|
+| Tables loaded | 14 · 2,022,081 rows | 14 · 2,022,081 rows |
+| LK-01 | PASS · 52 view columns | PASS · 52 view columns |
+| LK-05 | PASS · SQLSTATE 42501 | PASS · SQLSTATE 42501 |
+| DQ-01 | PASS · hash identical | PASS · hash identical, two independent runs |
+| FK constraints | 21 · 0 orphans | 21 · 0 orphans |
+| CHECK constraints | 102 · 0 violations | **104** · 0 violations |
+| Validation suite | 59 pass · 0 HARD · 0 SOFT · 6 skip | 59 pass · 0 HARD · 0 SOFT · 6 skip |
+
+
+### 6b. Defect 2 follow-up — did quantise-then-derive move any EC figure?
+
+Requested on the record rather than assumed. Defect 2 changed how money is
+represented: every cost line is quantised to paisa, then `total_variable_cost`
+and `contribution_margin` are **re-derived from the quantised lines** instead of
+being rounded independently. Each figure was expected to move by at most one
+paisa. It did.
+
+**EC-03 to EC-06 cannot have moved, and did not.** Those four tests reconcile an
+**exemplar** order at ₹1,000 GMV, computed from `params.yaml` alone
+(`reconcile_exemplar`). The fix touched only `generate_economics`, which builds
+the per-order lines. No parameter changed, so the exemplar is arithmetically
+identical.
+
+| Test | Value | Target | Result |
+|---|---:|---:|---|
+| EC-03 `prepaid_delivered_cm` | 111.24 | 112.0 ± 4 | **PASS** |
+| EC-04 `cod_delivered_cm` | 106.00 | 107.0 ± 4 | **PASS** |
+| EC-05 `cod_rto_cash_loss` | −317.57 | −309.0 ± 12 | **PASS** |
+| EC-06 `cod_rto_economic_cost` | −423.57 | −416.0 ± 15 | **PASS** |
+
+**What did move** are the *empirical means* across the realised order
+distribution, and `p*`, which is derived from them:
+
+| Figure | Before the fix | After the fix | Movement |
+|---|---:|---:|---:|
+| mean COD delivered CM | 109.930287961760 | 109.930344115463 | +5.6 × 10⁻⁵ |
+| mean COD RTO cash loss | −316.832711890244 | −316.832750000000 | −3.8 × 10⁻⁵ |
+| mean COD RTO economic cost | −423.538583079268 | −423.538578506098 | +4.6 × 10⁻⁶ |
+| **p\* derived** | 0.257590953292 | 0.257591027976 | **+7.5 × 10⁻⁸** |
+
+The largest movement is **6 hundredths of a paisa** on a mean taken over tens of
+thousands of orders — sub-paisa rounding differences averaging out, which is
+exactly the expected signature.
+
+**p\* is the only one of these that a test gates**, at 0.257 ± 0.008. It moved by
+7.5 × 10⁻⁸, roughly **five orders of magnitude inside the tolerance**, and sits
+0.00059 from target with 0.0074 of margin remaining. **PASS**, unchanged.
+
+**EC-07** (SOFT, band 150–180 Cr) is **167.79 Cr**. The fix's arithmetic bound on
+it is 15,084 RTO orders × 4.6 × 10⁻⁶ ≈ ₹0.07 in total, or **1.8 × 10⁻⁶ Cr** —
+not visible at any reported precision.
+
+**The identity the defect broke is now exact, not approximately exact.** Verified
+in PostgreSQL, where the columns are `NUMERIC` and the arithmetic is exact rather
+than binary floating point:
+
+```sql
+SELECT count(*) FROM analytics.fct_order_economics
+WHERE contribution_margin <> net_revenue - cogs - total_variable_cost;
+--  0
+```
+
+(The same subtraction in the Parquet layer leaves a residual of 3.6 × 10⁻¹²,
+which is float64 representation noise in the check itself, not a money error —
+and is a small reminder of why the DDL was the layer that caught this.)
+
+**Conclusion: no EC test moved off its mark.** Every figure moved by less than a
+paisa, and the one gated figure retains its full margin.
+
 ---
 
 ## 7. Outstanding before Phase 3 opens
@@ -229,7 +341,12 @@ it ran against — a stale file reports SKIP, not a fabricated PASS.
 | Item | Blocker |
 |---|---|
 | BR-09, GT-01/03/04/06/07 | Phase 5 — need fitted models |
-| `logit_cod_components` / `logit_rto_components` | Declared JSONB, entirely NULL. Registered gap (L12) — **needs a ruling**: populate, sample, or drop from the DDL |
 | `docs/data_generating_process.md` | Not written; A3, A25 and A26 owe it documentation |
 
-**146 unit tests passing.** Working tree clean at tag `phase2b-verified`.
+**170 unit tests passing** (146, plus 24 added with A45). Working tree clean at
+tag `phase2b-verified-2`.
+
+`logit_cod_components` / `logit_rto_components` were the third row of this
+table and are now **ruled and closed** (**A45**): populated for a documented
+2,000-session stratified audit sample, with `components_populated` making the
+remaining NULLs explicit. See §4 and limitation L12.

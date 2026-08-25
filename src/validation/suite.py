@@ -21,7 +21,7 @@ import pandas as pd
 
 from pathlib import Path
 
-from src.validation.dataset_hash import order_hash
+from src.validation.dataset_hash import ddl_hash, order_hash
 from src.validation.result import ResultSet, Severity, Status, TestResult
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -50,11 +50,20 @@ def _database_check(test_id, name, severity, tables, skip_reason) -> TestResult:
         return _skip(test_id, name, severity, skip_reason)
 
     published = json.loads(path.read_text(encoding="utf-8"))
-    current = order_hash(tables["fct_order"])
-    if published.get("fct_order_sha256") != current:
+    if published.get("fct_order_sha256") != order_hash(tables["fct_order"]):
         return _skip(test_id, name, severity,
                      "reports/database_checks.json was written against a DIFFERENT "
                      "dataset. Re-run scripts/04_verify_database.py against this one.")
+    # The schema can go stale independently of the data, and did: decision A45
+    # added a column and two CHECK constraints while leaving fct_order
+    # byte-identical by design. A data-only guard would have accepted a result
+    # describing the old schema. LK-01 is the sharpest case -- it is a claim
+    # about a VIEW, which lives entirely in the DDL.
+    if published.get("ddl_sha256") != ddl_hash():
+        return _skip(test_id, name, severity,
+                     "reports/database_checks.json was written against a DIFFERENT "
+                     "schema (sql/*.sql has changed). Reload and re-run "
+                     "scripts/04_verify_database.py.")
     check = published.get("checks", {}).get(test_id)
     if check is None:
         return _skip(test_id, name, severity, skip_reason)

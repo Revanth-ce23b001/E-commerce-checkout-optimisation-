@@ -33,9 +33,14 @@ neither the 42 data-validation tests nor the 146 unit tests had caught — see
 decision **A44**. The load now runs a pre-flight that blocks on any declared
 column that is absent from the frame or entirely NULL.
 
-One open item needs a ruling: `logit_cod_components` and `logit_rto_components`
-are declared JSONB and are entirely NULL (limitation **L12**). It is a registered
-gap, printed on every load, not a hidden one.
+The sixth of those defects is now ruled and closed (**A45**):
+`logit_cod_components` and `logit_rto_components` are populated for a documented
+**2,000-session stratified audit sample** — 1,995 rows after de-duplication —
+with a `components_populated` flag so the remaining NULLs are stated rather than
+ambiguous. Full population was rejected at ~190 MB for a diagnostic that is only
+ever read one order at a time (limitation **L12**). The `KNOWN_EMPTY` registry is
+now empty; a stricter `PARTIAL_BY_DESIGN` check enforces that the trace is
+present in exactly the rows the flag claims.
 
 ## Source of truth
 
@@ -68,10 +73,11 @@ gap, printed on every load, not a hidden one.
 make setup       # create .venv and install pinned dependencies
 make dev         # generate the 5,000-order development dataset
 make generate    # generate the full 100K+ dataset
+make load        # load PostgreSQL, create views, apply REVOKE (DROPS both schemas)
+make verify      # LK-01, LK-05, DQ-01, FK and CHECK against the live server
 make validate    # run the validation suite -> reports/data_validation_report.md
-make load        # load PostgreSQL, create views, apply REVOKE
 make test        # pytest — unit tests for generator code
-make all         # generate -> validate -> load
+make all         # generate -> load -> verify -> validate
 ```
 
 ### Without `make`
@@ -85,7 +91,15 @@ invocation is always available:
 | `make dev` | `.venv/Scripts/python.exe scripts/01_generate.py --dev` |
 | `make generate` | `.venv/Scripts/python.exe scripts/01_generate.py` |
 | `make load` | `.venv/Scripts/python.exe scripts/02_load_postgres.py --force` |
+| `make verify` | `.venv/Scripts/python.exe scripts/04_verify_database.py` |
+| `make validate` | `.venv/Scripts/python.exe scripts/03_validate.py` |
+| `make baseline` | `.venv/Scripts/python.exe scripts/04_verify_database.py --manifest` |
 | — | `.venv/Scripts/python.exe scripts/02_load_postgres.py --dry-run` |
+
+**Order matters.** `verify` publishes `reports/database_checks.json`, which
+`validate` reads so that LK-01, LK-05 and DQ-01 report as real results rather
+than SKIPs. That file is gated on **both** the dataset hash and the DDL hash, so
+running these out of order degrades to SKIP rather than reporting a stale PASS.
 
 On macOS/Linux the interpreter is `.venv/bin/python`.
 

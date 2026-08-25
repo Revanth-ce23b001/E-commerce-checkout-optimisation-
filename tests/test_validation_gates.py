@@ -149,3 +149,64 @@ class TestCal10StillFrozen:
         result = cal_10_reason_weights_frozen(params)
         assert result.status is Status.PASS, result.detail
         assert result.severity is Severity.HARD
+
+
+class TestDdlStalenessGate:
+    """The staleness guard on `reports/database_checks.json` (decision A45).
+
+    A database-backed result depends on two things that can go stale
+    independently: the data it ran against, and the schema it ran against. The
+    guard originally hashed only the data.
+
+    A45 is what exposed that. It added a column and two CHECK constraints while
+    leaving `fct_order` byte-identical *on purpose* — so a data-only guard would
+    have accepted a results file describing 102 constraints as current evidence
+    about a schema that now has 104. LK-01 is the sharper case: it is a claim
+    about a VIEW, which lives entirely in the DDL, so the data hash says nothing
+    about it at all.
+    """
+
+    def test_ddl_hash_is_stable_across_calls(self):
+        from src.validation.dataset_hash import ddl_hash
+        assert ddl_hash() == ddl_hash()
+        assert len(ddl_hash()) == 64
+
+    def test_ddl_hash_changes_when_a_statement_changes(self, tmp_path):
+        from src.validation.dataset_hash import ddl_hash
+        (tmp_path / "00_a.sql").write_text("CREATE TABLE t (a int);", encoding="utf-8")
+        before = ddl_hash(tmp_path)
+        (tmp_path / "00_a.sql").write_text(
+            "CREATE TABLE t (a int, b bool NOT NULL);", encoding="utf-8")
+        assert ddl_hash(tmp_path) != before
+
+    def test_ddl_hash_changes_when_a_file_is_added(self, tmp_path):
+        # The realistic A45 shape: existing DDL untouched, a new constraint file
+        # alongside it. Nothing already-hashed changed, and the hash must move.
+        from src.validation.dataset_hash import ddl_hash
+        (tmp_path / "00_a.sql").write_text("CREATE TABLE t (a int);", encoding="utf-8")
+        before = ddl_hash(tmp_path)
+        (tmp_path / "01_b.sql").write_text("CREATE VIEW v AS SELECT a FROM t;",
+                                           encoding="utf-8")
+        assert ddl_hash(tmp_path) != before
+
+    def test_ddl_hash_is_order_independent_of_filesystem_listing(self, tmp_path):
+        # Hashed in name order, so two checkouts of the same tree agree even if
+        # the directory enumerates differently.
+        from src.validation.dataset_hash import ddl_hash
+        (tmp_path / "01_b.sql").write_text("SELECT 2;", encoding="utf-8")
+        (tmp_path / "00_a.sql").write_text("SELECT 1;", encoding="utf-8")
+        first = ddl_hash(tmp_path)
+        for f in tmp_path.glob("*.sql"):
+            content = f.read_text(encoding="utf-8")
+            f.unlink()
+            f.write_text(content, encoding="utf-8")
+        assert ddl_hash(tmp_path) == first
+
+    def test_filename_is_part_of_the_hash(self, tmp_path):
+        # Renaming a file changes which DDL runs and in what order, so it must
+        # change the hash even when every byte of content is identical.
+        from src.validation.dataset_hash import ddl_hash
+        (tmp_path / "00_a.sql").write_text("SELECT 1;", encoding="utf-8")
+        before = ddl_hash(tmp_path)
+        (tmp_path / "00_a.sql").rename(tmp_path / "00_z.sql")
+        assert ddl_hash(tmp_path) != before
