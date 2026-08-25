@@ -210,3 +210,93 @@ class TestDdlStalenessGate:
         before = ddl_hash(tmp_path)
         (tmp_path / "00_a.sql").rename(tmp_path / "00_z.sql")
         assert ddl_hash(tmp_path) != before
+
+
+class TestDq15OutcomeIndependence:
+    """DQ-15 must fail on the exact defect it was written for (decision A46).
+
+    `attempt_delay_days` was published on 100% of returned orders and 0% of
+    delivered ones for the whole of Phase 2, and every one of the other 68 checks
+    passed throughout. The reason is instructive: a column that is NULL on a
+    principled subset violates no rule they encode, and this one *is* legitimately
+    NULL on non-attempt events.
+
+    So the assertion under test is not "is the column ever populated" -- that was
+    always true -- but "**is its population independent of the outcome**". These
+    tests drive it from both sides: full population passes, and emptying EITHER
+    arm alone fails.
+    """
+
+    @staticmethod
+    def _orders(n_delivered=6, n_returned=4):
+        import pandas as pd
+        rows = []
+        for i in range(n_delivered):
+            rows.append({"order_id": f"D{i}", "is_shipped": True,
+                         "is_censored": False, "rto_flag": False})
+        for i in range(n_returned):
+            rows.append({"order_id": f"R{i}", "is_shipped": True,
+                         "is_censored": False, "rto_flag": True})
+        # Neither should be eligible: cancelled has no attempt, censored has no
+        # resolved outcome. If DQ-15 counted them it would fail on clean data.
+        rows.append({"order_id": "C0", "is_shipped": False,
+                     "is_censored": False, "rto_flag": None})
+        rows.append({"order_id": "Z0", "is_shipped": True,
+                     "is_censored": True, "rto_flag": None})
+        return pd.DataFrame(rows)
+
+    @staticmethod
+    def _events(order_ids, delay=3):
+        import pandas as pd
+        return pd.DataFrame([{"order_id": o, "attempt_number": 1,
+                              "attempt_delay_days": delay} for o in order_ids])
+
+    def _run(self, orders, events):
+        from src.validation.result import ResultSet
+        from src.validation.suite import _dq_15
+        results = ResultSet()
+        _dq_15(results, orders, events)
+        return [r for r in results.results if r.test_id == "DQ-15"][0]
+
+    def test_passes_when_both_arms_are_populated(self):
+        orders = self._orders()
+        events = self._events([o for o in orders["order_id"] if o[0] in "DR"])
+        assert self._run(orders, events).status is Status.PASS
+
+    def test_fails_when_the_delivered_arm_is_empty(self):
+        # The actual A46 defect, reproduced exactly.
+        orders = self._orders()
+        events = self._events([o for o in orders["order_id"] if o.startswith("R")])
+        result = self._run(orders, events)
+        assert result.status is Status.FAIL
+        assert "delivered: 0/6" in result.actual
+
+    def test_fails_when_the_returned_arm_is_empty(self):
+        # The mirror defect. Asserting both arms separately is what catches it;
+        # a single pooled count would pass at 6/10 populated.
+        orders = self._orders()
+        events = self._events([o for o in orders["order_id"] if o.startswith("D")])
+        result = self._run(orders, events)
+        assert result.status is Status.FAIL
+        assert "returned: 0/4" in result.actual
+
+    def test_cancelled_and_censored_orders_are_not_required_to_have_a_delay(self):
+        orders = self._orders()
+        events = self._events([o for o in orders["order_id"] if o[0] in "DR"])
+        assert self._run(orders, events).status is Status.PASS
+
+    def test_only_attempt_one_rows_count(self):
+        # A retry row carrying a delay must not satisfy the check for an order
+        # whose FIRST attempt has none -- the coefficient is read from attempt 1.
+        import pandas as pd
+        orders = self._orders(n_delivered=1, n_returned=1)
+        events = pd.DataFrame([
+            {"order_id": "D0", "attempt_number": 1, "attempt_delay_days": 2},
+            {"order_id": "R0", "attempt_number": 2, "attempt_delay_days": 5},
+        ])
+        assert self._run(orders, events).status is Status.FAIL
+
+    def test_skips_rather_than_passes_when_the_table_is_absent(self):
+        # A missing table must never read as a pass -- same rule as the stale
+        # database_checks.json gate.
+        assert self._run(self._orders(), None).status is Status.SKIP

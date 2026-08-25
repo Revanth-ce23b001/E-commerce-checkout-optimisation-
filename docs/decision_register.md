@@ -1544,6 +1544,21 @@ up until the day it should have failed.
 | 2 | **DQ-01** — reproducibility | The manifest was compared against **the run that wrote it** | Everything. A manifest compared to its own run proves only that a hash function is deterministic. Fixed by requiring two independent generation runs from the same seed, and saying so in the manifest's own `note` field |
 | 3 | **`database_checks.json` staleness gate** | Keyed on the **dataset hash alone** | A schema change. Decision A45's defining property is that the *data* stays byte-identical while the *schema* moves, so the guard would have accepted a file asserting "102 check predicates, 0 violations" as current evidence about a 104-constraint schema. LK-01 is sharper still — it is a claim about a **view**, which exists only in the DDL, so the data hash says nothing about it whatever. Fixed by adding `ddl_sha256` |
 
+There is a **second pattern in the same family**, and A46 is its third instance:
+**a rename happened in one place and the dependent code never followed, and
+nothing checked the correspondence.**
+
+| # | The rename | What did not follow | How it surfaced |
+|---|---|---|---|
+| 1 | `pit_days_since_last_order` specified as a risk feature | The day loop collected `pit_last_order_day` and nothing consumed it | A44 defect 4 — the pre-flight column **diff** |
+| 2 | `true_cod_propensity` "filled at the module-20 roll-up" | The roll-up was never written | A44 defect 5 — `NotNullViolation` |
+| 3 | `delivery_delay_days` → `attempt_delay_days`, renamed **specifically** so the column would not be outcome-conditional | `build_delivery_events` kept emitting it only on failure events | **A46** — an analysis tried to use it and could not |
+
+The shared shape: an intention recorded in a name, a docstring or a decision
+register, with no executing check that the rest of the system honours it. The
+remedy is the same each time — turn the intention into something that runs.
+A44's answer was the load pre-flight; A46's is DQ-15.
+
 **The rule, stated generally: a check whose reference is derived from the thing
 it checks is not a check.** It is a restatement, dressed as a verification.
 
@@ -1800,6 +1815,78 @@ This is the same finding as A44, one level up. A44 was "the schema was never
 executed against data". This is "the guard on the schema's own evidence was never
 executed against a schema change". Both were correct-looking, both were inert,
 and both only became visible when something actually ran.
+
+**No slope, level or business assumption moved.**
+
+### A46 — `attempt_delay_days` was published only on failures · **RULED · OPTION (a)**
+
+Found in Phase 3 while attempting H6. `fct_delivery_event.attempt_delay_days`
+was populated on **15,084 of 15,084 returned orders and 0 of 76,166 delivered
+ones**.
+
+#### The distinction that decides the remedy
+
+This is **not** a data-generating-process defect. Three things were checked
+before ruling:
+
+| Question | Evidence | Verdict |
+|---|---|---|
+| Was δ₂ = 0.22 multiplying an outcome-conditional variable? | `delivery_timeline()` runs on **all `ord_pos`**; the shock is added for every order; `draw_rto(...)` is on the *next line* | **No.** The causal order is delay → shock → probability → draw |
+| Did the delay actually exist for delivered orders during generation? | The A45 component trace: **749 of 749** sampled delivered orders carry a non-zero `shock.attempt_delay_days`, mean implied delay **2.058 days** (returned: 3.072) | **Yes.** The 3.07-vs-2.06 gap is the planted effect as a difference in means |
+| Is the shock term leakage-shaped? | Absent from `leakage_guard.safe_feature_whitelist` and from `vw_risk_model_input`; LK-01 passes | **No.** The firewall is intact |
+
+**The generated data is sound; the exported view of it was incomplete.** The
+defect is confined to the projection layer.
+
+#### Root cause
+
+The column was hung on an **event type that exists only for failures**. Under
+decision A8 it is an *attempt-grain* fact — days between the promised date and
+the first delivery attempt — and every shipped order has a first attempt. But
+`build_delivery_events` emitted an attempt event only when the attempt failed; a
+delivered order's successful first attempt was emitted as `DELIVERED` with
+`with_delay=False`.
+
+The rename from `delivery_delay_days` to `attempt_delay_days` existed
+**specifically** to make the column outcome-independent. The rename happened.
+The emission never followed it, and nothing checked the correspondence.
+
+#### Ruling: option (a)
+
+`with_delay=True` on the `DELIVERED` emit. Rejected alternatives:
+
+* **(b) a new `DELIVERY_ATTEMPT_SUCCEEDED` event** — changes the delivery-event
+  vocabulary and attempt-count semantics for no gain.
+* **(c) move the column to `fct_order`** — A8 put it on `fct_delivery_event`
+  deliberately because it is attempt-grain; order-grain would recreate the
+  `delivery_delay_days` confusion the rename existed to prevent.
+
+**`attempt_number = 1` is emitted with it.** This goes marginally beyond the
+literal ruling and is load-bearing: the DDL documents the access pattern as
+*"read from the `attempt_number = 1` row"*, so populating the delay without the
+attempt number would leave that query outcome-conditional one layer down — the
+same defect, moved rather than fixed. A delivered order's successful first
+attempt **is** attempt 1. Nothing derives attempt *counts* from this table
+(`fct_order.delivery_attempts` is generated independently), so no count moves.
+
+#### Conditions, all discharged
+
+See the closing report and `reports/data_validation_report.md`. In summary:
+`fct_order` byte-identical; **DQ-15** added as a HARD test; the
+`attempt_delay_days ≤ delivery_delay_days` reconciliation verified; full suite
+re-run with CAL-11, the AUC ceiling and every EC figure unchanged.
+
+#### DQ-15 — the check that was missing
+
+```
+attempt_delay_days IS NOT NULL for every shipped, non-cancelled order,
+asserted separately across BOTH rto_flag arms, counts reported per arm.
+```
+
+The assertion is deliberately **not** "is this column ever populated" — that
+passed throughout the defect's life. It is "**is its population independent of
+the outcome**". Both arms are asserted separately so a regression that empties
+one cannot hide behind the other being full.
 
 **No slope, level or business assumption moved.**
 

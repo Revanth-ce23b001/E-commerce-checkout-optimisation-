@@ -346,6 +346,79 @@ def h6_promise_vs_delay(frame: pd.DataFrame) -> dict:
     }
 
 
+def h6_deviance_comparison(frame: pd.DataFrame) -> dict:
+    """H6 as specified: promise vs realised delay, in the same model (A46).
+
+    Available only after decision A46 populated ``attempt_delay_days`` on
+    delivered orders. Before that the variable was published conditional on the
+    outcome and this model was circular.
+
+    **This is a DIAGNOSTIC model, not a predictive one.** ``attempt_delay_days``
+    is Stage-4 information, hard-blocked from every risk model and absent from
+    ``vw_risk_model_input``. It is admissible here because the question is
+    "which mechanism explains RTO", not "what can we score at checkout" -- and
+    the answer to the first determines whether any checkout intervention is the
+    right instrument at all.
+
+    Explanatory power is measured as **deviance contribution**: the increase in
+    residual deviance when the term is dropped from the full model, which is the
+    likelihood-ratio statistic for that term. Reported alongside the share of
+    the model's total explained deviance, so the two drivers are comparable on
+    one scale rather than through two coefficients in different units.
+
+    Geography is controlled throughout, because promise is 83% determined by the
+    destination's base transit time and an uncontrolled promise term is mostly a
+    geography term wearing a disguise (see :func:`h6_promise_vs_delay`).
+    """
+    import statsmodels.api as sm
+
+    work = resolved(frame).copy()
+    work["rto"] = work["rto_flag"].fillna(False).astype(int)
+    work = work[work["attempt_delay_days"].notna()].copy()
+
+    base_cols = pd.get_dummies(work["geo_tier"].astype(str), prefix="geo",
+                               drop_first=True, dtype=float)
+    base_cols["serviceability"] = work["serviceability_score"].astype(float)         if "serviceability_score" in work else 0.0
+    terms = {
+        "estimated_delivery_days": work["estimated_delivery_days"].astype(float),
+        "attempt_delay_days": work["attempt_delay_days"].astype(float),
+    }
+    y = work["rto"].to_numpy(float)
+
+    def deviance(cols: dict) -> tuple[float, object]:
+        X = pd.concat([base_cols] + [v.rename(k) for k, v in cols.items()], axis=1)
+        m = sm.Logit(y, sm.add_constant(X).astype(float)).fit(disp=False, maxiter=200)
+        return -2 * m.llf, m
+
+    null_dev, _ = deviance({})
+    full_dev, full = deviance(terms)
+    total_explained = null_dev - full_dev
+
+    out = {}
+    for name in terms:
+        without = {k: v for k, v in terms.items() if k != name}
+        dev_without, _ = deviance(without)
+        contribution = dev_without - full_dev
+        out[name] = {
+            "deviance_contribution": contribution,
+            "share_of_explained": contribution / total_explained,
+            "coefficient": float(full.params[name]),
+            "se": float(full.bse[name]),
+        }
+    ratio = (out["attempt_delay_days"]["deviance_contribution"]
+             / max(out["estimated_delivery_days"]["deviance_contribution"], 1e-12))
+    return {
+        "n": len(work),
+        "null_deviance": null_dev,
+        "full_deviance": full_dev,
+        "total_explained_by_both": total_explained,
+        "terms": out,
+        "delay_over_promise_ratio": ratio,
+        "delay_dominates": bool(ratio > 1.0),
+        "full_pseudo_r2": float(full.prsquared),
+    }
+
+
 # ---------------------------------------------------------------------------
 # H11 — payment failure as a cause of COD, and what kind of COD it makes
 # ---------------------------------------------------------------------------

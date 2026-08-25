@@ -121,3 +121,46 @@ SELECT
     round(sum(gap_pp * (n_cod + n_prepaid))/ sum(n_cod + n_prepaid), 4) AS ate_pooled_weighted,
     round(sum(gap_pp * n_prepaid)          / sum(n_prepaid), 4)     AS atu_prepaid_weighted
 FROM kept;
+
+
+-- ---------------------------------------------------------------------------
+-- Q14. A46 RECONCILIATION  --  attempt_delay_days vs delivery_delay_days
+--
+-- Business question: do the two lateness measures agree on delivered orders?
+-- Product decision: none directly. This is the check the RENAME was supposed to
+--   enable and nobody ran (decision A46). Both measure days late against the
+--   same promise, at DIFFERENT events -- first attempt vs final delivery -- so
+--   they need not be equal, but the first attempt cannot happen AFTER the
+--   delivery it is part of. So `attempt_delay_days <= delivery_delay_days` must
+--   hold on every delivered order.
+--
+-- Expected residual: `delivery_delay_days` derives from `days_to_resolve`, which
+-- is CLIPPED to the [4, 25] day resolution window (params
+-- `fulfilment.outcome_resolution_days`). Where the clip binds, the delivered
+-- delay is truncated while the attempt delay is not, so a small number of
+-- violations is expected and is a property of the censoring window rather than
+-- of the fix. Counted and reported rather than tolerated silently.
+-- ---------------------------------------------------------------------------
+WITH d AS (
+    SELECT o.order_id,
+           o.delivery_delay_days,
+           o.actual_delivery_days,
+           s.estimated_delivery_days,
+           e.attempt_delay_days
+    FROM analytics.fct_order o
+    JOIN analytics.fct_checkout_session s ON s.session_id = o.session_id
+    JOIN analytics.fct_delivery_event e
+      ON e.order_id = o.order_id AND e.event_name = 'DELIVERED'
+    WHERE o.is_delivered
+)
+SELECT
+    count(*)                                                       AS delivered_orders,
+    count(attempt_delay_days)                                      AS with_attempt_delay,
+    count(*) FILTER (WHERE attempt_delay_days > delivery_delay_days) AS violations,
+    round(100.0 * count(*) FILTER (WHERE attempt_delay_days > delivery_delay_days)
+          / count(*), 4)                                           AS violation_pct,
+    max(attempt_delay_days - delivery_delay_days)                  AS worst_excess_days,
+    -- Where the clip binds, actual_delivery_days sits on a boundary.
+    count(*) FILTER (WHERE attempt_delay_days > delivery_delay_days
+                       AND actual_delivery_days IN (4, 25))        AS violations_at_clip
+FROM d;

@@ -611,6 +611,50 @@ def _dq(results, params, tables, truth, ledger, extra) -> None:
                    share >= floor, f">= {floor}", f"{share:.4f}",
                    "Blueprint 11 needs real censoring to DEMONSTRATE maturation bias."))
 
+    _dq_15(results, orders, tables.get("fct_delivery_event"))
+
+
+def _dq_15(results, orders, events) -> None:
+    """Decision A46. attempt_delay_days must not be outcome-conditional.
+
+    THE CHECK THAT WAS MISSING. `attempt_delay_days` was published on 100% of
+    returned orders and 0% of delivered ones, because it was emitted on an event
+    type that only exists for failures. Nothing caught it: a column that is NULL
+    on a principled subset violates no rule the other 68 tests encode, and this
+    one *is* legitimately NULL on non-attempt events.
+
+    So the assertion is not "is this column ever populated" -- that passed
+    throughout -- but "**is its population independent of the outcome**". Both
+    arms are asserted separately and both counts are reported, so a regression
+    that empties one arm cannot hide behind the other being full.
+    """
+    if events is None:
+        results.add(_skip("DQ-15", "attempt_delay_days on every shipped order",
+                          Severity.HARD, "fct_delivery_event not loaded"))
+        return
+
+    first = events[events["attempt_number"] == 1]
+    with_delay = set(first.loc[first["attempt_delay_days"].notna(), "order_id"])
+
+    eligible = orders[orders["is_shipped"] & ~orders["is_censored"]]
+    rto = eligible["rto_flag"].fillna(False).to_numpy(bool)
+    arms = {"returned": eligible.loc[rto, "order_id"],
+            "delivered": eligible.loc[~rto, "order_id"]}
+
+    detail, missing_total = [], 0
+    for arm, ids in arms.items():
+        missing = int((~ids.isin(with_delay)).sum())
+        missing_total += missing
+        detail.append(f"{arm}: {len(ids) - missing:,}/{len(ids):,}")
+
+    results.add(_r("DQ-15", "attempt_delay_days on every shipped order",
+                   Severity.HARD, missing_total == 0,
+                   "zero missing in either arm",
+                   f"{missing_total} missing ({'; '.join(detail)})",
+                   "A46: the column must be populated independently of the "
+                   "outcome, or H6 cannot be tested and the shock input looks "
+                   "leakage-shaped."))
+
 
 def _dq_07(results, orders, customers) -> None:
     """Decision A9 split DQ-07 into three."""

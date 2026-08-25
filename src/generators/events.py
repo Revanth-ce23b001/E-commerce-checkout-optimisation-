@@ -37,7 +37,7 @@ def build_delivery_events(
 
     * cancelled  → ORDER_PLACED, CANCELLED_PRESHIP
     * censored   → ORDER_PLACED, DISPATCHED            (outcome not yet visible)
-    * delivered  → ORDER_PLACED, DISPATCHED, DELIVERED
+    * delivered  → ORDER_PLACED, DISPATCHED, DELIVERED   (attempt 1, with delay)
     * RTO        → ORDER_PLACED, DISPATCHED, 3x DELIVERY_ATTEMPT_FAILED,
                    RTO_INITIATED, RTO_RECEIVED
     """
@@ -95,7 +95,22 @@ def build_delivery_events(
     emit(shipped, "DISPATCHED", dispatch_lag)
 
     observable = shipped & ~censored
-    emit(observable & delivered, "DELIVERED", days_to_resolve.astype(float))
+    # Decision A46. `attempt_delay_days` is an ATTEMPT-grain fact: days between
+    # the promised date and the FIRST delivery attempt. Every shipped order has
+    # a first attempt -- a delivered order's simply succeeded. Emitting the delay
+    # only on DELIVERY_ATTEMPT_FAILED hung it on an event type that exists only
+    # for failures, which made the column outcome-conditional in the published
+    # data even though the generator computed it for every order.
+    #
+    # `attempt=1` is part of the fix, not decoration: the DDL documents the
+    # access pattern as "read from the attempt_number = 1 row", and populating
+    # the delay without the attempt number would leave that query outcome-
+    # conditional one layer down. A delivered order's successful first attempt
+    # IS attempt 1. Nothing derives attempt COUNTS from this table --
+    # `fct_order.delivery_attempts` is generated independently -- so this changes
+    # no count anywhere.
+    emit(observable & delivered, "DELIVERED", days_to_resolve.astype(float),
+         attempt=1, with_delay=True)
 
     # An RTO exhausts every attempt (A33 condition b), so all three are emitted.
     for attempt in range(1, max_attempts + 1):
