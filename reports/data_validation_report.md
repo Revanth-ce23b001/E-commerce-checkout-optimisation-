@@ -9,7 +9,7 @@ All HARD tests that RAN pass, and 0 SOFT failure(s) — but 6 HARD test(s) could
 - master seed: `20260115`
 - params sha256: `40327eb7aec2cf00ac4179f4421b6a51…`
 - dgp sha256: `ba17a1622d923d2d006b2e008172d4c5…`
-- generated: 2026-08-25T17:37:18.283916+00:00
+- generated: 2026-08-25T20:14:05.508082+00:00
 
 | Table | Rows |
 |---|---:|
@@ -118,6 +118,8 @@ Frozen (decision A38):
 | DQ-12 | HARD | PASS | No nulls on required columns | zero | 0 |
 | DQ-13 | HARD | PASS | payment_rail NULL iff COD | zero | 0 |
 | DQ-14 | HARD | PASS | Censoring present in the late window | >= 0.03 | 0.3563 |
+| DQ-15 | HARD | PASS | attempt_delay_days populated AND reachable | both arms complete on (a) column and (b) access path | (a) returned 15,084/15,084; delivered 76,166/76,166 | (b) attempt_number=1 path: returned 15,084/15,084; delivered 76,166/76,166 |
+| DQ-16 | HARD | PASS | No undeclared outcome-conditional columns | every flagged column declared | 0 undeclared |
 | GT-02 | HARD | PASS | Naive gap exceeds the AME | naive > AME | 17.73pp > 9.99pp |
 | GT-01 | HARD | SKIP | Coefficient recovery | — | not runnable |
 | GT-03 | HARD | SKIP | Adjustment closes the gap partially | — | not runnable |

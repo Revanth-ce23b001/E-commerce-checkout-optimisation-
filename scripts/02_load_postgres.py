@@ -31,7 +31,16 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.load_helpers import connect, read_env  # noqa: E402
 
+# SCHEMA files only. The analysis library lives in sql/analysis/ and must NOT be
+# swept in here: those files are SELECT queries, and applying them as DDL runs
+# them against an empty schema at load time. Found the honest way -- adding the
+# Phase 3 query library to sql/ made this loader try to execute it, and a
+# NULLIF-guarded ratio raised DivisionByZero on a table with no rows.
+#
+# The glob is narrowed rather than the files renamed, so a future analysis file
+# cannot re-enter the DDL path by being named carelessly.
 SQL_DIR = REPO_ROOT / "sql"
+ANALYSIS_DIR = SQL_DIR / "analysis"
 DATA_DIR = REPO_ROOT / "data" / "raw"
 ENV_FILE = REPO_ROOT / "config" / "database.env"
 
@@ -294,7 +303,7 @@ def copy_table(connection, name: str, frame) -> int:
 def load(env: dict) -> int:
     import pandas as pd
 
-    sql_files = sorted(SQL_DIR.glob("*.sql"))
+    sql_files = sorted(p for p in SQL_DIR.glob("*.sql") if p.parent == SQL_DIR)
     parquet = {p.stem: p for p in DATA_DIR.glob("*.parquet")}
     missing = [t for t in LOAD_ORDER if t not in parquet]
     if missing:
@@ -363,7 +372,7 @@ def main(argv=None) -> int:
                         help="required: the load DROPS and recreates both schemas")
     args = parser.parse_args(argv)
 
-    sql_files = sorted(SQL_DIR.glob("*.sql"))
+    sql_files = sorted(p for p in SQL_DIR.glob("*.sql") if p.parent == SQL_DIR)
     if not sql_files:
         print(f"No .sql in {SQL_DIR}")
         return 2

@@ -269,7 +269,7 @@ class TestDq15OutcomeIndependence:
         events = self._events([o for o in orders["order_id"] if o.startswith("R")])
         result = self._run(orders, events)
         assert result.status is Status.FAIL
-        assert "delivered: 0/6" in result.actual
+        assert "delivered 0/6" in result.actual
 
     def test_fails_when_the_returned_arm_is_empty(self):
         # The mirror defect. Asserting both arms separately is what catches it;
@@ -278,7 +278,7 @@ class TestDq15OutcomeIndependence:
         events = self._events([o for o in orders["order_id"] if o.startswith("D")])
         result = self._run(orders, events)
         assert result.status is Status.FAIL
-        assert "returned: 0/4" in result.actual
+        assert "returned 0/4" in result.actual
 
     def test_cancelled_and_censored_orders_are_not_required_to_have_a_delay(self):
         orders = self._orders()

@@ -670,11 +670,12 @@ the reading.
 | **H4** | Order value → COD is an inverted U | non-monotonic | **inverted U, peak ₹1,678** | **PRIOR MET** |
 | **H5a** | Ratings raise COD | small but significant | **+4.50pp per lost star** | **PRIOR MET** |
 | **H5b** | `review_count` on RTO is a planted null | ≈ 0 | **−0.022, −1.0pp across p10–p90** | **NULL HOLDS** |
-| **H6** | Realised delay dominates promise | delay > promise | **untestable — see D.5** | **CANNOT SETTLE** |
+| **H6** | Realised delay dominates promise | delay > promise (50%) | **delay explains 15.4× promise** | **PRIOR MET** |
 | **H11** | Payment failure causes COD | 8–15% | **5.90%** | **BELOW** |
 
-Three priors miss. Two of the three misses have identifiable mechanisms; the
-third is a measurement that could not be made.
+Three priors miss, and all three have identifiable mechanisms. H6 was
+untestable until decision **A46** repaired a projection defect that published
+realised delay conditional on the outcome; it is now settled, and decisively.
 
 ---
 
@@ -871,18 +872,84 @@ error does. It reinforces the reading rather than undermining it.*
 
 ---
 
-### D.5 H6 — promise versus realised delay · **CANNOT SETTLE**
+### D.5 H6 — promise versus realised delay · **PRIOR MET: delay dominates, 15.4×**
 
-This is the most instructive result in section D, and it is a negative one.
+Phase 1 pre-registered "delay > promise" at **50% confidence** — the least
+confident prior in the whole set, and a genuine coin flip. It is now settled.
 
-#### The promise effect is real, small, and extremely specification-sensitive
+This hypothesis was **untestable until decision A46**. Realised delay was
+published only on orders that returned, so any model containing it was circular.
+A46 repaired the projection; the comparison below is the one Phase 1 asked for.
+
+#### The comparison, in the same model
+
+Explanatory power measured as **deviance contribution** — the increase in
+residual deviance when the term is dropped from the full model, which is the
+likelihood-ratio statistic for that term. Geography is controlled throughout,
+because promise is 83% determined by the destination's base transit time.
+
+| Term | Stage | Deviance contribution | Coefficient |
+|---|---|---:|---:|
+| `estimated_delivery_days` (promise) | 2 — **known at checkout** | **68.0** | +0.0754 (se 0.0091) |
+| `attempt_delay_days` (realised) | 4 — **known only after dispatch** | **1,047.0** | +0.1267 (se 0.0039) |
+
+n = 91,250, with 100% coverage on both outcome arms after A46. Null deviance
+75,625.6 → 74,575.8 full; the two terms jointly explain 1,049.8.
+
+**Realised delay explains 15.4× what the promise explains.**
+
+*The two shares sum to more than 100% (6.5% + 99.7%) because the terms are
+correlated — dropping either lets the other absorb part of its work. That is
+expected of drop-one-term contributions and does not affect the ordering.*
+
+#### Per-day and in aggregate are different questions, and both are answered
+
+The **coefficients** differ by only 1.7× (0.1267 against 0.0754), close to the
+planted ratio of 2.0× (ledger: shock delay 0.22 against promise 0.11). The
+**deviance** differs by 15.4×.
+
+Both are correct. Per promised day, a longer promise is roughly half as harmful
+as a day of actual lateness. But promise has almost no independent variation
+left to exert that effect through — it is 83% pinned by geography and takes only
+ten integer values — whereas realised delay varies freely, order by order.
+
+**A lever is worth its coefficient times the range you can actually move it
+over.** Promise fails on the second factor.
+
+#### The product conclusion, stated plainly
+
+**This is a logistics fix, not a checkout fix. No intervention in the Phase 1
+library will move it.**
+
+Every checkout lever — trust signals, COD fees, prepaid incentives, partial
+payment, intent screening — acts at or before the moment of commitment. Realised
+delay is determined after dispatch, by courier performance and transit reality.
+The one checkout-time proxy available, the promise itself, carries **6.5%** of
+the explained deviance and is mostly a restatement of the delivery address.
+
+Three consequences follow.
+
+1. **Do not build a "shorten the promise" intervention.** Shortening a promise
+   without changing the logistics behind it moves the number the customer sees,
+   not the parcel. The measured promise effect at the honest specification is
+   about +1.8pp of RTO per extra day, and most of even that is geography.
+2. **Promise accuracy belongs in the waterfall as a logistics line, not a
+   checkout line.** §B.4 already places `DELIVERY_ATTEMPTED_OUTSIDE_WINDOW` and
+   `COURIER_OPERATIONAL_FAILURE` under STRUCTURAL, 38.56% of RTO cost. H6 is the
+   evidence that classification was right.
+3. **This bounds what Phase 5 can promise.** The largest single explanatory
+   factor in RTO is one the checkout team does not control. An intervention deck
+   that implies otherwise is overselling.
+
+**This is a negative result and one of the more useful findings in the project**
+— it removes a plausible-sounding intervention from the roadmap on evidence
+rather than on opinion.
+
+#### The promise effect alone, and why specification matters so much
 
 The raw gradient looks overwhelming: RTO rises from **7.1%** at a one-day promise
-to **30.7%** at eight days. But promise is not assigned — it is a function of
-where the parcel is going. Correlation with the geography's own base transit time
-is **0.834**.
-
-Watch the effect dissolve as the geography behind it is controlled:
+to **30.7%** at eight days. Watch it dissolve as the geography behind it is
+controlled:
 
 | Specification | Promise coefficient | Per extra promised day |
 |---|---:|---:|
@@ -892,73 +959,16 @@ Watch the effect dissolve as the geography behind it is controlled:
 | + geography base transit time | **−0.0461** | −0.63pp |
 | + all three | −0.0472 | −0.64pp |
 
-**The honest specification is the second or third row**, and it recovers roughly
-the planted value (ledger: +0.11 on centred promise days). The fourth row is
-*over-controlling*: promise is 83% determined by base transit time, so
-conditioning on it removes the very variation the coefficient is meant to
-describe and leaves noise.
+The honest specification is the second or third row, and it recovers roughly the
+planted value of +0.11. The fourth is **over-controlling**: promise is 83%
+determined by base transit time, so conditioning on it removes the very variation
+the coefficient describes and leaves noise.
 
-An analyst who reported the first row would claim a **7.7× overstatement**. One
-who reported the fourth would claim the effect runs backwards. Neither would know.
-
-#### The delay side cannot be measured at all
-
-Phase 1 asks for promise and realised delay *in the same model*. **That model
-cannot be built from this warehouse.**
-
-| Population | Orders | `delivery_delay_days` | `attempt_delay_days` |
-|---|---:|---:|---:|
-| Delivered | 76,166 | **76,166** | 0 |
-| Returned | 15,084 | 0 | **15,084** |
-
-The two delay measures are perfectly complementary and **outcome-determined**.
-Knowing which column is populated tells you the outcome with certainty, so any
-model containing realised delay as a predictor of RTO is circular. There is no
-specification that fixes this — it is a property of what was published, not of
-how the model is written.
-
-**This is also a Phase 2 finding, and it was diagnosed rather than worked
-around.** Decision A8 states that `attempt_delay_days` "exists for every shipped
-order whether it RTOs or not". In the generator it does. In the published
-`fct_delivery_event` it does not, because `DELIVERY_ATTEMPT_FAILED` events are
-only emitted for orders that returned.
-
-Three things were checked before concluding, and two of the obvious worries do
-not hold (full diagnosis in **limitation L13**):
-
-| | |
-|---|---|
-| Was the shock coefficient δ₂ multiplying an outcome-conditional variable? | **No.** `delivery_timeline` runs on every order in the batch and the RTO draw happens on the next line, from the probability the delay produced. The A45 component trace confirms it empirically: **749 of 749 sampled delivered orders carry a non-zero `shock.attempt_delay_days`**, mean implied delay 2.06 days |
-| Is the shock term leakage-shaped? | **No.** `attempt_delay_days` is absent from the safe-feature whitelist and from `vw_risk_model_input`; LK-01 passes |
-| Is H6 untestable? | **Yes.** This is the one consequence that stands |
-
-So the data-generating process is sound and the defect is confined to the
-**projection layer** — one `with_delay=True` flag that follows the event type
-rather than the order. **Logged as an A44-class gap: the decision is true of the
-code and false of the data.** Awaiting a ruling on whether to regenerate;
-`fct_order` would be byte-identical, so DQ-01's baseline survives either way.
-
-#### The verdict, and why the shape of it matters
-
-**H6 is untestable as specified.** Its prior was 50% — the least confident in the
-entire pre-registered set — and that caution turns out to have been aimed at the
-wrong risk. The hypothesis did not fail; it could not be run.
-
-The truth file's ledger says realised delay carries **0.22 per day** in the
-post-dispatch shock against promise's **0.11**, so delay does dominate, roughly
-2:1 — *but that comes from the planted parameters, not from the analysis*, and it
-would be unavailable in any real version of this work.
-
-**Product read.** What the data can support is narrower than Phase 1 hoped and
-still decision-relevant: the promise-length lever is worth roughly **+1.8pp of
-RTO per extra promised day** at the honest specification, and most of what looks
-like a promise effect is really a *geography* effect. Shortening promises in
-hard-to-serve pincodes without changing the underlying logistics would move
-almost nothing. **That is a logistics conclusion reached from checkout data, and
-it argues against a checkout intervention** — which is what makes it worth
-reporting.
-
----
+An analyst reporting the first row would claim a 7.7× overstatement; one
+reporting the fourth would claim the effect runs backwards. Neither would know.
+**The discipline that settled the ATT/ATU question in §C.5 applies here too:
+reason about what the control is doing before looking at where the estimate
+lands.**
 
 ### D.6 H11 — payment failure as a cause of COD · **BELOW PRIOR, but the consequence is larger than the share**
 
@@ -1022,15 +1032,21 @@ project needs an experiment, and naming these precisely is the bridge to Phase 6
 | **Behavioural — zero-collateral commitment** | The core COD mechanism: paying nothing at commitment creates a free option to refuse | This is exactly the residual §C could not recover. It lives in `latent_intent`, which is unobservable by construction. Payment method is *chosen*, so no observational contrast isolates the collateral effect from the disposition that produced the choice | **Exogenous variation in prepayment requirement.** A partial-payment arm (e.g. ₹100 at checkout) is the only design that moves collateral while holding disposition fixed. This is the instrument §C.6 says does not exist in the data |
 | **Checkout — COD as the visual default** | Position and pre-selection drive COD share | The interaction design is a constant. Nothing in the event stream records where COD sat on the page, because it always sat in the same place | Randomise payment-option ordering and pre-selection. Guardrail on low-risk-segment conversion |
 
-**A fourth, discovered here rather than predicted: H6's realised-delay effect
-(§D.5).** Phase 1 expected this to be answerable observationally. It is not — but
-for a different reason than the three above. Trust, collateral and defaults are
-unidentified because *the world does not vary*. H6 is unidentified because *the
-warehouse publishes the variable conditional on the outcome*. The first three
-need an experiment; H6 needs a schema change.
+**A fourth was discovered here rather than predicted — and then fixed.** H6's
+realised-delay effect was unidentifiable, but for a different reason than the
+three above. Trust, collateral and defaults are unidentified because *the world
+does not vary*. H6 was unidentified because *the warehouse published the variable
+conditional on the outcome* (decision **A46**). The first three need an
+experiment; H6 needed a schema change, which it got — and the hypothesis is now
+settled in §D.5.
 
-That distinction is worth keeping. **"We cannot answer this" has at least two
-causes, and only one of them is expensive to fix.**
+That distinction is the durable part. **"We cannot answer this" has at least two
+causes, and only one of them is expensive to fix.** Three of these four are
+structural facts about the world. The fourth looked identical from inside the
+analysis and was a one-line projection bug. Telling them apart took a diagnosis
+rather than a judgement — and had it been mistaken for the first kind, a real,
+answerable, roadmap-changing question would have been written off as unanswerable
+and filed next to the ones that genuinely are.
 
 #### What this means for how the findings should be spoken about
 
@@ -1076,13 +1092,13 @@ answer and what each would need.
 
 | Path | Contains |
 |---|---|
-| `sql/10_funnel.sql` | Q1–Q4 — funnel, conversions, abandonment, payment reliability |
-| `sql/11_economics.sql` | Q5–Q9 — RTO split, annualisation, avoidability, waterfall, p\* segments |
+| `sql/analysis/10_funnel.sql` | Q1–Q4 — funnel, conversions, abandonment, payment reliability |
+| `sql/analysis/11_economics.sql` | Q5–Q9 — RTO split, annualisation, avoidability, waterfall, p\* segments |
 | `src/analysis/funnel.py` | The same metrics in pandas |
 | `scripts/05_crosscheck.py` | Asserts SQL == Python on 48 metrics; asserts `analyst` denied on `truth` |
 | `notebooks/03_exploratory_analysis.ipynb` | Scale, distributions, the planted truth |
 | `notebooks/04_checkout_funnel.ipynb` | Section A |
-| `sql/12_hypotheses.sql` | Q11–Q13 — raw crosstab, stratified cells, the three standardisations |
+| `sql/analysis/12_hypotheses.sql` | Q11–Q13 — raw crosstab, stratified cells, the three standardisations |
 | `src/analysis/h1_decomposition.py` | Section C — all four estimates plus the GT-03 rule |
 | `notebooks/05_rto_analysis.ipynb` | Sections B and C |
 | `src/analysis/hypotheses.py` | Section D — H2–H6 and H11 |

@@ -612,6 +612,43 @@ def _dq(results, params, tables, truth, ledger, extra) -> None:
                    "Blueprint 11 needs real censoring to DEMONSTRATE maturation bias."))
 
     _dq_15(results, orders, tables.get("fct_delivery_event"))
+    _dq_16(results, params, tables)
+
+
+def _dq_16(results, params, tables) -> None:
+    """Decision A46. No column may be outcome-conditional without a declaration.
+
+    The generalisation of DQ-15. DQ-15 guards the one column A46 was about;
+    this guards the SHAPE, across every order-linked column and five outcome
+    partitions.
+
+    It is an allowlist, not a heuristic. A legitimately outcome-conditional
+    column (an RTO reason cannot exist on a delivered order) is declared in
+    `params.yaml`. Anything flagged and undeclared fails, which means the next
+    A46 shows up as a red test with a name attached rather than as a hypothesis
+    that quietly cannot be tested two phases later.
+
+    Declared-but-no-longer-flagged entries are REPORTED, never failed: a column
+    can stop being outcome-conditional for a good reason -- A46 is exactly that
+    -- and failing on it would punish the fix.
+    """
+    from src.validation import outcome_conditional as oc
+
+    flagged = oc.sweep(tables)
+    allowlist = params.require("dq16_expected_outcome_conditional")
+    undeclared = oc.undeclared(flagged, allowlist)
+    stale = oc.unused_declarations(flagged, allowlist)
+
+    note = f"{len(flagged)} flagged, {len(allowlist)} declared"
+    if stale:
+        note += f"; {len(stale)} declared but no longer flagged: {', '.join(stale)}"
+    results.add(_r("DQ-16", "No undeclared outcome-conditional columns",
+                   Severity.HARD, not undeclared,
+                   "every flagged column declared",
+                   f"{len(undeclared)} undeclared"
+                   + (f": {', '.join(undeclared)}" if undeclared else ""),
+                   f"A46: {note}. A column whose availability depends on the "
+                   "outcome cannot be used to explain that outcome."))
 
 
 def _dq_15(results, orders, events) -> None:
@@ -633,27 +670,43 @@ def _dq_15(results, orders, events) -> None:
                           Severity.HARD, "fct_delivery_event not loaded"))
         return
 
-    first = events[events["attempt_number"] == 1]
-    with_delay = set(first.loc[first["attempt_delay_days"].notna(), "order_id"])
-
     eligible = orders[orders["is_shipped"] & ~orders["is_censored"]]
     rto = eligible["rto_flag"].fillna(False).to_numpy(bool)
     arms = {"returned": eligible.loc[rto, "order_id"],
             "delivered": eligible.loc[~rto, "order_id"]}
 
-    detail, missing_total = [], 0
-    for arm, ids in arms.items():
-        missing = int((~ids.isin(with_delay)).sum())
-        missing_total += missing
-        detail.append(f"{arm}: {len(ids) - missing:,}/{len(ids):,}")
+    # (a) the column is populated somewhere on the order.
+    populated = set(events.loc[events["attempt_delay_days"].notna(), "order_id"])
+    # (b) the DOCUMENTED ACCESS PATH returns exactly one row per shipped order.
+    #     The DDL says delta_2 is "read from the attempt_number = 1 row", so this
+    #     is the query that has to work. A column can be populated and still be
+    #     unreachable through the path everything downstream is told to use --
+    #     which would be the same defect relocated one layer down.
+    path = events[(events["attempt_number"] == 1)
+                  & events["attempt_delay_days"].notna()]
+    rows_per_order = path.groupby("order_id").size()
+    reachable_once = set(rows_per_order[rows_per_order == 1].index)
+    duplicated = int((rows_per_order > 1).sum())
 
-    results.add(_r("DQ-15", "attempt_delay_days on every shipped order",
-                   Severity.HARD, missing_total == 0,
-                   "zero missing in either arm",
-                   f"{missing_total} missing ({'; '.join(detail)})",
-                   "A46: the column must be populated independently of the "
-                   "outcome, or H6 cannot be tested and the shock input looks "
-                   "leakage-shaped."))
+    detail_a, detail_b, missing_a, missing_b = [], [], 0, 0
+    for arm, ids in arms.items():
+        gap_a = int((~ids.isin(populated)).sum())
+        gap_b = int((~ids.isin(reachable_once)).sum())
+        missing_a += gap_a
+        missing_b += gap_b
+        detail_a.append(f"{arm} {len(ids) - gap_a:,}/{len(ids):,}")
+        detail_b.append(f"{arm} {len(ids) - gap_b:,}/{len(ids):,}")
+
+    ok = missing_a == 0 and missing_b == 0 and duplicated == 0
+    results.add(_r("DQ-15", "attempt_delay_days populated AND reachable",
+                   Severity.HARD, ok,
+                   "both arms complete on (a) column and (b) access path",
+                   f"(a) {'; '.join(detail_a)} | (b) attempt_number=1 path: "
+                   f"{'; '.join(detail_b)}"
+                   + (f" | {duplicated} order(s) with >1 attempt-1 row" if duplicated else ""),
+                   "A46: population must be independent of the outcome, and the "
+                   "DOCUMENTED access path must work on both arms. (b) is the "
+                   "real test -- a populated column can still be unreachable."))
 
 
 def _dq_07(results, orders, customers) -> None:

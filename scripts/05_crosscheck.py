@@ -295,25 +295,42 @@ def main() -> int:
     c.eq("H11 rto rate, switch-COD", switch_rto, h11["rto_rate_switch_cod"], RATE_TOL)
     c.eq("H11 rto rate, intent-COD", intent_rto, h11["rto_rate_intent_cod"], RATE_TOL)
 
-    # H6's observability wall, asserted rather than described: the two delay
-    # measures must be perfectly outcome-determined, or the finding is wrong.
-    (delivered_delay, delivered_attempt, rto_delay, rto_attempt), = query("""
+    # H6's observability, asserted rather than described. These four checks
+    # previously encoded the A46 DEFECT -- "delivered orders WITHOUT a delay = 0"
+    # was true only because the column was absent on that entire arm. After the
+    # fix the correct assertion is the opposite, and it is the property that must
+    # never regress: BOTH arms carry the delay, and the DOCUMENTED access path
+    # (attempt_number = 1) reaches both.
+    (delivered_delay, delivered_attempt, rto_delay, rto_attempt,
+     delivered_n, rto_n), = query("""
         SELECT count(o.delivery_delay_days) FILTER (WHERE o.is_delivered),
                count(d.ad)                  FILTER (WHERE o.is_delivered),
                count(o.delivery_delay_days) FILTER (WHERE o.rto_flag),
-               count(d.ad)                  FILTER (WHERE o.rto_flag)
+               count(d.ad)                  FILTER (WHERE o.rto_flag),
+               count(*) FILTER (WHERE o.is_delivered),
+               count(*) FILTER (WHERE o.rto_flag)
         FROM analytics.fct_order o
         LEFT JOIN LATERAL (SELECT max(attempt_delay_days) ad
                            FROM analytics.fct_delivery_event e
                            WHERE e.order_id = o.order_id
+                             AND e.attempt_number = 1
                              AND e.attempt_delay_days IS NOT NULL) d ON TRUE
         WHERE o.is_shipped AND NOT o.is_censored;""")
-    c.eq("H6 delivered orders WITHOUT attempt_delay", delivered_attempt, 0)
-    c.eq("H6 returned orders WITHOUT delivery_delay", rto_delay, 0)
-    c.eq("H6 delivered orders with delivery_delay", delivered_delay,
-         int(hyp[hyp["is_delivered"].fillna(False)]["delivery_delay_days"].notna().sum()))
-    c.eq("H6 returned orders with attempt_delay", rto_attempt,
-         int(hyp[hyp["rto_flag"].fillna(False)]["attempt_delay_days"].notna().sum()))
+    c.eq("A46 delivered orders reachable via attempt 1", delivered_attempt, delivered_n)
+    c.eq("A46 returned orders reachable via attempt 1", rto_attempt, rto_n)
+    # delivery_delay_days stays legitimately delivered-only (decision A8): an
+    # order that came back never delivered, so it has no delivery delay. Declared
+    # in the DQ-16 allowlist, and asserted here so the two agree.
+    c.eq("delivery_delay_days on every delivered order", delivered_delay, delivered_n)
+    c.eq("delivery_delay_days on no returned order", rto_delay, 0)
+    # The reconciliation the rename existed to enable (A46 condition 3).
+    (violations,), = query("""
+        SELECT count(*) FROM analytics.fct_order o
+        JOIN analytics.fct_delivery_event e
+          ON e.order_id = o.order_id AND e.event_name = 'DELIVERED'
+        WHERE o.is_delivered
+          AND e.attempt_delay_days > o.delivery_delay_days;""")
+    c.eq("attempt_delay <= delivery_delay on delivered", violations, 0)
 
     # -- the leakage boundary is part of the contract ----------------------
     print("\nLK  the analyst role cannot reach the truth schema")

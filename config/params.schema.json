@@ -31,7 +31,8 @@
     "leakage_guard",
     "seed",
     "calibration",
-    "truth_sampling"
+    "truth_sampling",
+    "dq16_expected_outcome_conditional"
   ],
   "$defs": {
     "target": {
@@ -1463,6 +1464,15 @@
           "exclusiveMinimum": 0,
           "exclusiveMaximum": 1
         }
+      }
+    },
+    "dq16_expected_outcome_conditional": {
+      "description": "Decision A46. Declared outcome-conditional columns, as table.column@partition. DQ-16 fails on anything flagged and not declared here.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z_]+\\.[a-z_0-9]+@[a-z_]+$"
       }
     }
   }

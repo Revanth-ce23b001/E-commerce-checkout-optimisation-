@@ -987,6 +987,65 @@ seed:
                delivery, reason, economics, truth_sampling]
 
 # -----------------------------------------------------------------------------
+# DQ-16 ALLOWLIST - decision A46
+#
+# Columns whose availability legitimately depends on an outcome, declared as
+# `table.column@partition`. DQ-16 sweeps every order-linked column across five
+# outcome partitions and FAILS on anything flagged that is not declared here.
+#
+# The declaration unit is (column, PARTITION), not column. A46's own fix is why:
+# after it, `attempt_delay_days` is still legitimately absent on CENSORED orders
+# but must never again be absent on DELIVERED ones. A bare-column allowlist would
+# excuse both and re-open the defect this test exists to close.
+#
+# ADDING A LINE HERE IS A DECISION. It asserts "this column cannot exist on the
+# other arm, by definition" -- not "this column happens to be missing today".
+# A46 was invisible for the whole of Phase 2 precisely because nothing forced
+# that sentence to be written down.
+#
+# Not listed, and worth knowing why: the outcome-conditional COST lines
+# (cod_handling_cost, reverse_shipping_cost, shrink_cost, ...) do not flag,
+# because decision A23 carries them as ZERO rather than NULL on orders they do
+# not apply to. Their availability is unconditional; only their value moves.
+# -----------------------------------------------------------------------------
+dq16_expected_outcome_conditional:
+  # An unresolved outcome has no outcome columns at all (decision A10).
+  - fct_order.rto_flag@is_censored
+  - fct_order.is_delivered@is_censored
+  - fct_order.actual_delivery_days@is_censored
+  - fct_order.outcome_resolved_date@is_censored
+  - fct_order.delivery_attempts@is_censored
+  - fct_delivery_event.attempt_number@is_censored
+  - fct_delivery_event.attempt_delay_days@is_censored
+
+  # A returned order never delivered, so it has no delivery delay (decision A8).
+  - fct_order.delivery_delay_days@rto_flag
+  - fct_order.delivery_delay_days@is_delivered
+
+  # Only a returned order has a return reason.
+  - fct_order.rto_reason@rto_flag
+  - fct_order.rto_reason@is_delivered
+  - fct_order.rto_reason_class@rto_flag
+  - fct_order.rto_reason_class@is_delivered
+
+  # A non-delivery report exists only on a FAILED attempt (constraint
+  # dlv_ndr_needs_fail), and only returned orders have failed attempts.
+  - fct_delivery_event.ndr_code@rto_flag
+  - fct_delivery_event.ndr_code@is_delivered
+
+  # Only a cancelled order has a cancelling actor.
+  - fct_order.cancel_actor@is_shipped
+
+  # A COD order has no payment rail. Test DQ-13 asserts the iff directly.
+  - fct_order.payment_rail@payment_method
+  # Same fact, carried on the session frame. NOTE: this column is PARQUET-ONLY --
+  # the DDL does not declare it and the loader's COPY drops it, so it never
+  # reaches the analytics schema. The sweep runs over the parquet frames, which
+  # are a SUPERSET of what is published; that is the safer direction, because a
+  # working column is caught before anyone decides to publish it.
+  - fct_checkout_session.payment_rail@payment_method
+
+# -----------------------------------------------------------------------------
 # TRUTH SAMPLING - decision A45
 #
 # Which sessions get a per-term logit trace in truth_order_probability. These

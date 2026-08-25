@@ -1,6 +1,6 @@
 """Phase 3 — funnel and RTO economics, computed in pandas.
 
-Why this exists as well as `sql/10_funnel.sql` and `sql/11_economics.sql`
+Why this exists as well as `sql/analysis/10_funnel.sql` and `sql/analysis/11_economics.sql`
 ------------------------------------------------------------------------
 Phase 1 §17 requires every metric to be reproducible from **both** SQL and
 Python, with matching values. That is not ceremony. The two paths share only
