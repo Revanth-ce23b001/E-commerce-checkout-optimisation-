@@ -1450,6 +1450,16 @@ This is the most valuable finding of Phase 2B, and it is a methodology finding
 rather than a bug log. It belongs in the case study's methodology section, not
 in a changelog.
 
+It carries **two** transferable lessons, not one:
+
+> 1. **Constraints are only constraints once executed.** A rule no engine has
+>    read is prose, however precisely it is written.
+> 2. **A check whose reference is derived from the thing it checks is not a
+>    check.** It is a restatement dressed as a verification, and it fails
+>    silently by construction — because it never fails at all.
+
+The second appeared three separate times in this build and is written up below.
+
 #### The finding
 
 `sql/00_schema_analytics.sql` and `sql/01_schema_truth.sql` were written early
@@ -1516,6 +1526,58 @@ what should exist. Defect 4 was found by diffing the DataFrame's columns against
 `information_schema.columns`: two lists that were supposed to agree, written
 months apart by the same person, that did not. No CHECK predicate would ever have
 fired, because nothing was violated. Something was merely missing.
+
+#### The second pattern: a check whose reference is derived from the thing it checks is not a check
+
+This one is worth separating out, because it is the more transferable of the
+two and it appeared **three times in this build, in three different subsystems,
+each time looking completely correct**.
+
+A check needs a reference to compare against. If that reference is produced by
+the same process it is meant to police, the comparison is a tautology: it passes
+by construction, reports green, and is indistinguishable from a real check right
+up until the day it should have failed.
+
+| # | The check | Where its reference came from | What it would have missed |
+|---|---|---|---|
+| 1 | **CAL-09** — no slope differs from `params.yaml` | The ledger was rebuilt *from `params.yaml`* | Everything. It compared the config file to a copy of itself and would have passed no matter what the generator multiplied. Fixed by recording what the **assembler actually consumed** at runtime and persisting that into `_truth.json`. An empty ledger now fails rather than vacuously passing |
+| 2 | **DQ-01** — reproducibility | The manifest was compared against **the run that wrote it** | Everything. A manifest compared to its own run proves only that a hash function is deterministic. Fixed by requiring two independent generation runs from the same seed, and saying so in the manifest's own `note` field |
+| 3 | **`database_checks.json` staleness gate** | Keyed on the **dataset hash alone** | A schema change. Decision A45's defining property is that the *data* stays byte-identical while the *schema* moves, so the guard would have accepted a file asserting "102 check predicates, 0 violations" as current evidence about a 104-constraint schema. LK-01 is sharper still — it is a claim about a **view**, which exists only in the DDL, so the data hash says nothing about it whatever. Fixed by adding `ddl_sha256` |
+
+**The rule, stated generally: a check whose reference is derived from the thing
+it checks is not a check.** It is a restatement, dressed as a verification.
+
+The tell is always the same question — *what independent thing is this being
+compared against?* If the honest answer is "itself, one step removed", there is
+no check there. And the failure is silent by construction: a tautological check
+never fails, so nothing ever draws attention to it. Green results are precisely
+what it is designed to produce.
+
+Note how each fix has the same shape: introduce a **genuinely independent second
+observation**. The runtime ledger is independent of the config file. The second
+generation run is independent of the first. The DDL hash is independent of the
+data hash. In every case the fix was not a better assertion — it was finding a
+second source of evidence.
+
+This is the same family as **A44's** main finding and as the
+`VALIDATE CONSTRAINT` trap. `ALTER TABLE … VALIDATE CONSTRAINT` asks the
+catalogue whether a constraint is marked valid — and a constraint created
+normally is marked valid on creation, so the answer is derived from the act of
+creating it rather than from the rows. Inspecting `pg_catalog` for LK-05 has the
+identical shape: it reports the grants the DDL *intended*, not what a real login
+is *refused*. Both were replaced with something that reads the actual data: an
+anti-join per foreign key, `WHERE (predicate) IS FALSE` per check, and a genuine
+denied `SELECT` as the `analyst` role.
+
+Two lessons, then, from the same build, and they compose:
+
+> **Constraints are only constraints once executed** — and **a check whose
+> reference is derived from the thing it checks is not a check, however often it
+> runs.**
+
+The first is about a check that never ran. The second is about a check that runs
+constantly and verifies nothing. The second is the more dangerous, because it
+produces evidence.
 
 #### What actually changed, as opposed to what was learned
 

@@ -252,6 +252,14 @@ rows the flag claims. The realistic failure — the audit sample silently
 collapsing to a handful of rows — passes an all-NULL check trivially and fails
 this one.
 
+**This was the third tautological check found in this build**, and the pattern is
+now named in A44: *a check whose reference is derived from the thing it checks is
+not a check.* The other two were CAL-09 rebuilding its ledger from `params.yaml`
+(comparing the config file to a copy of itself) and DQ-01 comparing a manifest
+against the run that wrote it. Each fix has the same shape — introduce a
+genuinely independent second observation: a runtime ledger, a second generation
+run, a DDL hash.
+
 **A fourth result, unplanned.** The staleness guard on
 `reports/database_checks.json` hashed only the dataset — and A45's defining
 property is that the dataset did not change while the schema did. A stale results

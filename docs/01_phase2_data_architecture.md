@@ -342,10 +342,12 @@ Columns marked **🔒 LEAKAGE** must never enter `vw_risk_model_input`. Columns 
 | `customer_id` | VARCHAR(12) | FK | CUS_0031882 | Generated | Join |
 | `pit_tenure_days` | INT | Days since signup, as of session | 452 | Derived [D] | Risk feature |
 | `pit_orders_placed` | INT | Orders placed before this session | 9 | Derived [D] | Risk feature |
+| `pit_orders_resolved` | INT | Prior orders whose outcome had **resolved** before this session — the `pit_rto_rate_raw` denominator (decision A20) | 7 | Derived [D] | Risk feature |
 | `pit_orders_delivered` | INT | Delivered **and resolved** before this session | 7 | Derived [D] | Risk feature |
 | `pit_rto_count` | INT | RTOs **resolved** before this session | 1 | Derived [D] | Risk feature |
 | `pit_rto_rate_raw` | NUMERIC(5,4) | `pit_rto_count / pit_orders_resolved` | 0.1250 | Derived [D] | Risk feature (unstable at low n) |
 | `pit_rto_rate_shrunk` | NUMERIC(5,4) | Empirical-Bayes shrunk toward population mean, `k=8` [A] | 0.1573 | Derived [D] | **Preferred risk feature (Phase 1 §9.2)** |
+| `pit_has_history` | BOOLEAN | `pit_orders_placed > 0`. The **missing-indicator** companion to the NULL point-in-time rates: decision A18 forbids imputing them, so a model uses this flag instead | true | Derived [D] | Risk feature |
 | `pit_cod_orders` | INT | COD orders before this session | 6 | Derived [D] | Risk feature |
 | `pit_cod_share` | NUMERIC(5,4) | `pit_cod_orders / pit_orders_placed` | 0.6667 | Derived [D] | **Habit feature (H2/H4)** |
 | `pit_prepaid_success_count` | INT | Successful prepaid payments before | 2 | Derived [D] | **Trust-established feature** |
@@ -356,6 +358,7 @@ Columns marked **🔒 LEAKAGE** must never enter `vw_risk_model_input`. Columns 
 | `pit_is_new_customer` | BOOLEAN | `pit_orders_delivered = 0` | false | Derived [D] | **Fairness gate (§8.4)** |
 | `pit_has_clean_record` | BOOLEAN | `pit_orders_delivered >= 3 AND pit_rto_count = 0` | false | Derived [D] | **Fairness cap (Phase 1 §8.4 rule 1)** |
 | `pit_risk_tier_rule_based` | VARCHAR(8) | LOW/MED/HIGH from the 3-rule baseline (Phase 1 §9.3) | MED | Derived [D] | Model floor + stratification |
+| `order_risk_tier_rule_based` | VARCHAR(8) | **M2** baseline tier — post-selection, *knows* `payment_method`. Lives on `fct_order`. Hard-blocked from M1: applying an M1 score to the M2 threshold is a category error | HIGH | Derived [D] | Model floor (M2 only) |
 
 > **Reconciliation invariant that must be tested:** for each customer, the *last* session's `pit_*` values plus that session's outcome must equal `dim_customer.hist_*_final`. If they don't, the point-in-time logic is broken. This is Validation Test **DQ-07**.
 
@@ -414,6 +417,7 @@ Columns marked **🔒 LEAKAGE** must never enter `vw_risk_model_input`. Columns 
 | `is_cancelled_preship` | BOOLEAN | Cancelled before dispatch | false | Derived [D] | **Stage 3/4** | 🔒 LEAKAGE |
 | `cancel_actor` | VARCHAR(10) | CUSTOMER / SELLER / SYSTEM / NULL | NULL | Generated [S] | Stage 4 | 🔒 LEAKAGE |
 | `is_shipped` | BOOLEAN | Dispatched | true | Derived [D] | **Stage 4** | 🔒 LEAKAGE; **RTO-rate denominator** |
+| `is_censored` | BOOLEAN | Shipped, but the 4–25 day outcome had not resolved by the window close (decision A10). Every outcome column is NULL. **Excluded from RTO-rate denominators and from annualisation** (L9) | false | Derived [D] | **Stage 4** | 🔒 LEAKAGE |
 | `actual_delivery_days` | SMALLINT | Days order→terminal event; NULL if not delivered | NULL | Generated [S] | **Stage 5** | 🔒 **LEAKAGE** |
 | `delivery_delay_days` | SMALLINT | `actual − estimated` | NULL | Derived [D] | **Stage 5** | 🔒 **LEAKAGE** |
 | `delivery_attempts` | SMALLINT | Count of attempt events | 3 | Derived [D] | **Stage 5** | 🔒 **LEAKAGE** |
@@ -434,6 +438,7 @@ Columns marked **🔒 LEAKAGE** must never enter `vw_risk_model_input`. Columns 
 | `event_name` | VARCHAR(28) | ORDER_PLACED / CANCELLED_PRESHIP / DISPATCHED / IN_TRANSIT / OUT_FOR_DELIVERY / DELIVERY_ATTEMPT_FAILED / DELIVERED / RTO_INITIATED / RTO_RECEIVED | DELIVERY_ATTEMPT_FAILED | Generated | Stage 4 |
 | `attempt_number` | SMALLINT | 1..3 for attempt events, else NULL | 2 | Generated | Stage 4 |
 | `ndr_code` | VARCHAR(32) | Non-delivery report code on failed attempts | CUSTOMER_UNREACHABLE | Generated [S] | Stage 5 |
+| `attempt_delay_days` | SMALLINT | Days between the promised date and the **first** delivery attempt. Decision A8: the Stage-2 shock input, distinct from `fct_order.delivery_delay_days`. NULL on non-attempt events. **Hard-blocked from every model** | 3 | Generated [S] | Stage 4 | 🔒 LEAKAGE |
 | `courier_partner` | VARCHAR(20) | Synthetic courier | Bluewing | Generated [S] | Stage 4 |
 
 ### 3.12 `fct_order_economics`
@@ -449,6 +454,7 @@ All ₹, one row per order. **All 🔒 LEAKAGE for the risk model** (realised CM
 | `cod_fee_revenue` | NUMERIC(6,2) | COD fee collected | On delivery only | Derived [D] |
 | `net_revenue` | NUMERIC(10,2) | `gmv − discount + shipping_fee + cod_fee`, **₹0 unless delivered** | Delivery | Derived [D] |
 | `cogs` | NUMERIC(10,2) | `cogs_ratio × net_revenue_if_delivered`; ₹0 on RTO (goods return) | Delivery | Derived [D] |
+| `cogs_value` | NUMERIC(10,2) | **Counterfactual** goods value, as if delivered (decision A23). Needed because on an RTO `net_revenue` and therefore `cogs` are zero, yet shrink and working-capital costs remain proportional to goods value | — | Derived [D] |
 | `forward_shipping_cost` | NUMERIC(6,2) | Outbound freight | **On dispatch — always** | Derived [D] |
 | `reverse_shipping_cost` | NUMERIC(6,2) | Return freight | RTO only | Derived [D] |
 | `packaging_cost` | NUMERIC(6,2) | Material + pick/pack | On dispatch — always | Derived [D] |
@@ -462,6 +468,7 @@ All ₹, one row per order. **All 🔒 LEAKAGE for the risk model** (realised CM
 | `ops_allocation_cost` | NUMERIC(6,2) | Per-delivered-order ops | Delivery only | Derived [D] |
 | `total_variable_cost` | NUMERIC(10,2) | Sum of all cost lines | — | Derived [D] |
 | `contribution_margin` | NUMERIC(10,2) | `net_revenue − total_variable_cost` | — | Derived [D] |
+| `counterfactual_cm_if_delivered` | NUMERIC(10,2) | What the CM **would have been** had this order delivered. Decision A42: ~5% of RTO orders were unprofitable anyway, so Phase 3's intervention set needs a *don't take this order* tier, not only payment and address levers (L10) | — | Derived [D] |
 | `rto_cash_loss` | NUMERIC(10,2) | Cash cost lines on RTO orders; ₹0 otherwise | — | Derived [D] |
 | `foregone_cm` | NUMERIC(10,2) | Counterfactual CM had it delivered; ₹0 if delivered | — | Derived [D] |
 | `rto_economic_cost` | NUMERIC(10,2) | `rto_cash_loss + foregone_cm` | — | Derived [D] |
@@ -486,11 +493,22 @@ All ₹, one row per order. **All 🔒 LEAKAGE for the risk model** (realised CM
 | `session_id` | VARCHAR(16) | PK |
 | `p_convert` | NUMERIC(6,5) | Generated session→order probability |
 | `p_cod_intent` | NUMERIC(6,5) | P(customer's *first choice* is COD) |
-| `logit_cod_components` | JSONB | Every additive term in the COD logit, by name |
+| `logit_cod_components` | JSONB | Every additive term in the COD logit, by name. Populated for the A45 audit sample only — see `components_populated` |
 | `p_rto_precheckout` | NUMERIC(6,5) | RTO probability from Stage-1/2 features only — **the theoretical ceiling for any risk model** |
 | `p_rto_final` | NUMERIC(6,5) | After the post-dispatch shock — what the Bernoulli draw actually used |
-| `logit_rto_components` | JSONB | Every additive term in the RTO logit, by name |
+| `logit_rto_components` | JSONB | Every additive term in the RTO logit, by name. Stage-1 terms bare; the four post-dispatch terms prefixed `shock.`. NULL where the session produced no order |
 | `post_dispatch_shock` | NUMERIC(6,4) | The logit-scale shock added at Stage 4 |
+| `components_populated` | BOOLEAN | Whether `logit_*_components` carry a trace for this session. TRUE for the A45 stratified audit sample (~2,000 sessions); FALSE otherwise. See limitation **L12** |
+
+> **Decision A45 — the trace columns are a documented sample, not a full column.**
+> `logit_cod_components` and `logit_rto_components` exist to make GT-01
+> auditable: open one order and read every additive term that produced its
+> probability. That is a lookup, never a scan, so ~2,000 stratified sessions are
+> traced rather than all 155,000 — full population costs ~190 MB of JSONB for a
+> query nobody runs in bulk. `components_populated` is what makes the remaining
+> NULLs a *stated* absence rather than an ambiguous one, and two CHECK
+> constraints tie it to the data so it cannot drift. Query these columns with
+> `WHERE components_populated`, or expect ~98.7% NULL.
 
 > **Implementation rule:** these two tables live in PostgreSQL schema `truth`, and the analytical role (`analyst`) is granted **no privileges** on that schema. The validation harness runs as a separate role. This makes leakage a permissions error, not a discipline problem.
 
