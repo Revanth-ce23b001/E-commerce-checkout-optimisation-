@@ -332,3 +332,44 @@ four strata are defined by outcomes. The generator re-derives each sampled
 probability from its own trace and refuses to store one that disagrees; the
 realised worst error is 8.88e-16.
 
+---
+
+## L13 — `attempt_delay_days` is published only on orders that RETURNED
+
+Decision **A8** states that `attempt_delay_days` "exists for every shipped order
+whether it RTOs or not". **In the generator it does. In the published database it
+does not.**
+
+`fct_delivery_event.attempt_delay_days` is carried on `DELIVERY_ATTEMPT_FAILED`
+events, and those events are emitted only for orders that exhausted their
+attempts and went back. The result is a pair of perfectly complementary columns:
+
+| Population | Orders | `fct_order.delivery_delay_days` | `attempt_delay_days` |
+|---|---:|---:|---:|
+| Delivered | 76,166 | 76,166 | **0** |
+| Returned | 15,084 | **0** | 15,084 |
+
+**Consequence.** Realised delivery lateness is observable *conditional on the
+outcome it would explain*. Knowing which column is populated identifies the
+outcome with certainty, so no model can use realised delay as a predictor of RTO
+without being circular. **Hypothesis H6 — "the promise-versus-actual gap is the
+real driver, not promise length" — is therefore untestable from the published
+data**, and is recorded as CANNOT SETTLE in `reports/phase3_findings.md` §D.5
+rather than as a failed test.
+
+**Class.** This is an **A44-class finding**: a decision that is true of the code
+and false of the data, discovered only when something tried to use the column.
+The 42 data-validation tests do not catch it, because a column that is NULL on a
+principled subset is not a defect by any rule they encode — `attempt_delay_days`
+is legitimately NULL on non-attempt events, and every delivered order is a
+non-attempt order. The check that would catch it is not "is this column ever
+populated" but "**is this column's population independent of the outcome**".
+
+**Not fixed in Phase 3.** Fixing it means emitting a delivery-attempt record for
+delivered orders too, which changes `fct_delivery_event` and requires a
+regeneration and reload. That is a Phase 2 change and needs a ruling, not an
+analyst's edit. Logged here so the gap is stated rather than worked around.
+
+**What is not lost.** The promise side of H6 is fully testable and is measured
+(§D.5): +1.8pp of RTO per extra promised day at the honest specification, with
+most of the apparent promise effect turning out to be geography.

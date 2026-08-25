@@ -1,7 +1,6 @@
 # Phase 3 — Diagnostic findings
 
-*Status: **A (funnel), B (RTO economics) and C (H1 decomposition) complete.**
-D (H2–H6, H11) not started.*
+*Status: **A, B, C and D complete.** Phase 3 diagnostic analysis closed.*
 
 Every figure below comes from PostgreSQL — queried as the restricted `analyst`
 role — or from `data/truth/_truth.json`. None comes from spec prose, which
@@ -561,9 +560,32 @@ This is worth flagging because **the wrong choice looks better.** The
 prepaid-weighted figure, 10.86pp, sits far closer to the true 9.99pp — and would
 have been reported as an impressively accurate adjustment. It is answering the
 mirror-image question (what would happen if prepaid customers went COD) and its
-apparent accuracy is a coincidence. I made this error in the first draft of the
-analysis and caught it by asking which population the truth file's AME was
-averaged over.
+apparent accuracy is a coincidence. I made this error in the first draft and
+caught it by asking which population `_truth.json`'s AME is averaged over.
+
+#### "Closer to the right answer" and "correctly specified" are different things
+
+This is the generalisable point, and it is worth more than the 3.7pp.
+
+The prepaid-weighted estimate was **rejected for being closer to the truth**.
+That sounds perverse until you notice what each property is worth. Accuracy was
+observable here only because this project has a planted ground truth; in the
+real version of this analysis there is no `_truth.json`, no 9.99pp to be near,
+and *no way whatsoever to tell that 10.86pp is better or worse than 14.59pp*.
+Correct specification, by contrast, is checkable without any of that — you check
+it by asking which population the counterfactual applies to, and the answer is
+in the question rather than in the data.
+
+So the only one of the two properties that survives outside a synthetic dataset
+is the one that had to be chosen against the evidence. **A number that agrees
+with a truth you would not have had is not a result; it is a coincidence you got
+lucky enough to notice.**
+
+The practical form of this: when a methodological choice moves an estimate,
+resolve it by reasoning about the estimand *before* looking at where each option
+lands. Looking first is how the wrong specification gets kept — not through bad
+faith, but because the closer number feels like confirmation that the choice
+behind it was right.
 
 ### C.6 No method can fully recover the truth, and that is the honest ceiling
 
@@ -587,6 +609,19 @@ the truth file would have no way to know the residual was 0.68pp rather than
 therefore: "a strong association, robust to every observed confounder, whose
 causal share cannot be identified from observational data."** Phase 1's H1 entry
 predicted exactly this limitation, and it survives contact with the data.
+
+> ### The sentence that must survive into the case study
+>
+> **Say:** "COD is strongly associated with RTO, and the association survives
+> adjustment for every observed confounder."
+>
+> **Never say:** "COD causes 12.7pp of RTO" — or 10.7pp, or any single number
+> presented as the causal effect.
+>
+> The second sentence is unsupportable *even though one of those numbers is
+> nearly right here*, because the analysis contains nothing that would let a
+> reader distinguish 0.68pp of residual bias from 5pp. The precision is
+> borrowed from a truth file that does not exist outside this repository.
 
 ### C.7 What this means for the product
 
@@ -619,6 +654,386 @@ Three decisions follow, and the third is the one that changes the roadmap.
 
 ---
 
+## D. H2–H6 and H11 against their pre-registered priors
+
+Each hypothesis was measured from the data first, then compared against
+`_truth.json`. Effect sizes throughout: at 91,250–105,605 rows, statistical
+significance carries almost no information and is reported only where it changes
+the reading.
+
+### D.0 Scorecard
+
+| | Hypothesis | Prior | Measured | Verdict |
+|---|---|---|---:|---|
+| **H2** | New customers adopt COD more | +12–18pp | **+22.46pp** | **ABOVE** |
+| **H3** | Prior RTO predicts future RTO | 2.0–2.5× | **1.693×** | **BELOW** |
+| **H4** | Order value → COD is an inverted U | non-monotonic | **inverted U, peak ₹1,678** | **PRIOR MET** |
+| **H5a** | Ratings raise COD | small but significant | **+4.50pp per lost star** | **PRIOR MET** |
+| **H5b** | `review_count` on RTO is a planted null | ≈ 0 | **−0.022, −1.0pp across p10–p90** | **NULL HOLDS** |
+| **H6** | Realised delay dominates promise | delay > promise | **untestable — see D.5** | **CANNOT SETTLE** |
+| **H11** | Payment failure causes COD | 8–15% | **5.90%** | **BELOW** |
+
+Three priors miss. Two of the three misses have identifiable mechanisms; the
+third is a measurement that could not be made.
+
+---
+
+### D.1 H2 — new customers adopt COD more · **ABOVE PRIOR**
+
+| | |
+|---|---:|
+| COD share, new customers | **79.2%** |
+| COD share, established customers | **56.8%** |
+| **Lift** | **+22.46pp** [21.86, 23.06] |
+| Prior | +12–18pp |
+
+The gradient is monotone across the whole tenure range:
+
+| Completed orders | COD share | Orders |
+|---|---:|---:|
+| 0 | 79.2% | 26,080 |
+| 1–2 | 63.2% | 38,261 |
+| 3–5 | 53.9% | 28,428 |
+| 6–15 | 44.4% | 12,681 |
+| 16+ | 28.4% | 155 |
+
+**Phase 1's stated alternative was that this is a geography artefact** — new
+customers skewing Tier-3, where COD is normal regardless of tenure. It is not:
+
+| Geo tier | New | Established | Lift |
+|---|---:|---:|---:|
+| METRO | 60.1% | 35.6% | **+24.51pp** |
+| TIER1 | 74.2% | 52.2% | +21.95pp |
+| TIER2 | 85.3% | 65.6% | +19.65pp |
+| TIER3 | 90.0% | 73.5% | +16.48pp |
+
+The lift survives inside every tier, and is *largest in METRO* — the opposite of
+the artefact story. Geography sets the level; tenure moves it by roughly the
+same amount everywhere.
+
+**Mechanism for the overshoot** (decision A43). The prior priced one coefficient
+in isolation: being new carries a direct +0.70 on the COD logit. But a new
+customer also *escapes* two negative terms that only accumulate with history —
+delivered orders (−0.18 per log-order) and successful prepaid payments (−0.35).
+The prior counted the term it could see and missed the two absences. In an
+additive model, what a row does not have is as much a driver as what it does.
+
+**Truth-file agreement:** `_truth.json` records H2 at **22.46pp**. The analysis
+reproduces it to two decimal places from a completely separate code path.
+
+**Product read:** onboarding is the highest-leverage intervention point, and it
+is highest-leverage *in metros*, where the absolute COD level is lowest and the
+tenure gap is widest.
+
+---
+
+### D.2 H3 — prior RTO predicts future RTO · **BELOW PRIOR**
+
+| | |
+|---|---:|
+| RTO rate, customers with a prior RTO | **23.6%** (n 24,219) |
+| RTO rate, customers without | **14.0%** (n 67,031) |
+| **Lift** | **1.693×** [1.643, 1.743] |
+| Prior | 2.0–2.5× |
+
+`pit_rto_count` counts only prior orders whose outcome had *resolved* before the
+session began, so the split is time-ordered and cannot leak the current outcome
+backwards.
+
+**The aggregate figure hides the shape, and the shape matters more:**
+
+| Prior RTOs | RTO rate | Lift vs zero | Orders |
+|---|---:|---:|---:|
+| 0 | 13.96% | 1.00× | 67,031 |
+| 1 | 20.70% | 1.48× | 15,514 |
+| 2 | 25.56% | 1.83× | 5,032 |
+| 3+ | 33.38% | **2.39×** | 3,673 |
+
+**At three or more prior RTOs the lift is 2.39× — inside the prior's 2.0–2.5×
+band.** The aggregate misses low because most customers with any prior RTO have
+exactly one, and one prior RTO is weak evidence. The prior was not wrong about
+repeat offenders; it was wrong about the mix.
+
+**Mechanism for the miss** (decision A37). Post-dispatch noise was raised from
+0.85 to 3.3125 to bring the AUC ceiling into GT-05's band. That noise dilutes
+*every* pre-checkout signal, including the customer's own prior-RTO rate, which
+carries +2.80 in the RTO logit by design. **This is a direct and traceable cost
+of a ruling made in Phase 2**, recorded as one rather than explained away.
+
+**Truth-file agreement:** `_truth.json` records 1.693×. Reproduced exactly.
+
+**Product read, with the fairness question Phase 1 flagged.** One prior RTO
+raises risk by 48% and is thin grounds for restricting a customer's payment
+options. Three raises it by 139%. Any COD-gating policy should key on a
+threshold, not on the binary "has ever returned" — and 3,673 orders is a small
+enough population that the policy's blast radius is manageable.
+
+---
+
+### D.3 H4 — order value and COD · **PRIOR MET: inverted U confirmed**
+
+Phase 1 predicted non-monotonicity with the peak below the top decile, and
+warned that a linear fit would falsely confirm a monotone story. **It would
+have.** A linear specification returns a coefficient of **+0.1002**, positive
+and overwhelmingly significant — and wrong.
+
+Four independent criteria, all of which must agree before claiming the U:
+
+| Test | Result | |
+|---|---|---|
+| Quadratic term negative | **−0.0738** (se 0.0077) | ✓ |
+| Quadratic improves the fit | LR = 91.3, p = 1.2 × 10⁻²¹ | ✓ |
+| Fitted peak inside the observed range | **₹1,678** | ✓ |
+| Raw deciles actually turn | peak at decile 9, decile 10 below it | ✓ |
+
+| Decile | Median value | COD share |
+|---|---:|---:|
+| 1 | ₹236 | 58.1% |
+| 5 | ₹574 | 62.9% |
+| 7 | ₹819 | 64.4% |
+| **9** | **₹1,344** | **65.2%** ← peak |
+| 10 | ₹2,478 | 63.4% |
+
+COD share rises 7.1pp from the cheapest decile to the ninth, then falls 1.8pp in
+the top decile. The turn is modest but consistent across all four tests.
+
+**Product read — this is the one that changes an instrument, not just a
+number.** A linear value-based COD fee would charge most where COD propensity is
+*already falling*, taxing the affluent prepaid-inclined buyers in the top decile
+who were never the problem. The policy needs **bands with a peak around
+₹1,300–1,700**, not a slope. Phase 1's implication table said exactly this
+conditional on non-monotonicity; the condition holds.
+
+*Note: the fitted marginal peak (₹1,678) sits below the conditional peak the
+generating process implies (~₹3,200), because the marginal curve mixes categories
+with different price levels and COD propensities. Both are correct; they answer
+different questions.*
+
+---
+
+### D.4 H5 — ratings, and a planted null
+
+#### H5a — ratings on COD selection · **PRIOR MET**
+
+Controlling for order value, cart size, category and geo tier:
+
+| Driver | Coefficient | 95% CI | One-unit drop → COD share |
+|---|---:|---|---:|
+| Seller rating | −0.1967 | [−0.2319, −0.1616] | **+4.50pp** |
+| Product rating | −0.1537 | [−0.1782, −0.1292] | +3.53pp |
+| log1p(review count) | −0.0597 | [−0.0693, −0.0501] | +1.39pp |
+
+Phase 1's stated risk was that ratings are too compressed to carry signal. They
+are compressed — seller ratings run 3.79–4.77 at the 10th/90th percentile,
+products 3.30–4.69 — and they carry signal anyway. Across the realised seller
+spread of roughly one star, the effect is about **+4.4pp of COD share**.
+
+Phase 1 calls this *"the key test for the trust claim"*. It passes: quality
+signals visible at the moment of decision measurably shift payment choice, after
+controls. The caveat in Phase 1's limitation column stands — ratings proxy
+*product* trust, not *platform* trust, so this implicates trust in general
+without isolating which kind.
+
+#### H5b — `review_count` on RTO · **THE PLANTED NULL HOLDS** (GT-04, early)
+
+| | |
+|---|---:|
+| Fitted coefficient | **−0.0219** |
+| 95% CI | [−0.0355, −0.0083] |
+| p-value | **0.0016** |
+| Effect across the p10–p90 review-count range | **−1.02pp** RTO |
+| Planted value (`_truth.json` ledger) | −0.05 |
+
+**The coefficient is statistically significant and practically null, and the
+first fact is worthless.** At 91,250 rows a p-value of 0.0016 is what a genuinely
+negligible effect looks like. The honest reading is the effect size: moving a
+product from the 10th to the 90th percentile of review count shifts its RTO
+probability by **one percentage point**, against a 16.5% base.
+
+Compare, in the same model and on the same scale:
+
+| Driver | Coefficient | |
+|---|---:|---|
+| `is_cod` | **+1.301** | 59× larger |
+| `address_completeness` | **−0.592** | 27× larger |
+| `log1p(review_count)` | −0.022 | — |
+
+**Anyone reporting "review count reduces RTO" from this data would be
+over-fitting**, and the failure would be invisible without an effect-size
+discipline. This is GT-04's failure mode arriving early, and the guard that
+catches it is not a significance threshold — it is refusing to quote a
+coefficient without its magnitude next to a real one.
+
+*The fitted −0.022 is attenuated relative to the planted −0.05, and the CI
+excludes the planted value. That is expected: at this noise level a −0.05 signal
+is near the resolution limit, and attenuation toward zero is what measurement
+error does. It reinforces the reading rather than undermining it.*
+
+---
+
+### D.5 H6 — promise versus realised delay · **CANNOT SETTLE**
+
+This is the most instructive result in section D, and it is a negative one.
+
+#### The promise effect is real, small, and extremely specification-sensitive
+
+The raw gradient looks overwhelming: RTO rises from **7.1%** at a one-day promise
+to **30.7%** at eight days. But promise is not assigned — it is a function of
+where the parcel is going. Correlation with the geography's own base transit time
+is **0.834**.
+
+Watch the effect dissolve as the geography behind it is controlled:
+
+| Specification | Promise coefficient | Per extra promised day |
+|---|---:|---:|
+| Promise alone | **+0.3191** | **+4.88pp** |
+| + serviceability score | +0.1273 | +1.83pp |
+| + courier reliability | +0.0537 | +0.75pp |
+| + geography base transit time | **−0.0461** | −0.63pp |
+| + all three | −0.0472 | −0.64pp |
+
+**The honest specification is the second or third row**, and it recovers roughly
+the planted value (ledger: +0.11 on centred promise days). The fourth row is
+*over-controlling*: promise is 83% determined by base transit time, so
+conditioning on it removes the very variation the coefficient is meant to
+describe and leaves noise.
+
+An analyst who reported the first row would claim a **7.7× overstatement**. One
+who reported the fourth would claim the effect runs backwards. Neither would know.
+
+#### The delay side cannot be measured at all
+
+Phase 1 asks for promise and realised delay *in the same model*. **That model
+cannot be built from this warehouse.**
+
+| Population | Orders | `delivery_delay_days` | `attempt_delay_days` |
+|---|---:|---:|---:|
+| Delivered | 76,166 | **76,166** | 0 |
+| Returned | 15,084 | 0 | **15,084** |
+
+The two delay measures are perfectly complementary and **outcome-determined**.
+Knowing which column is populated tells you the outcome with certainty, so any
+model containing realised delay as a predictor of RTO is circular. There is no
+specification that fixes this — it is a property of what was published, not of
+how the model is written.
+
+**This is also a Phase 2 finding.** Decision A8 states that `attempt_delay_days`
+"exists for every shipped order whether it RTOs or not". In the generator it
+does. In the published `fct_delivery_event` it does not, because
+`DELIVERY_ATTEMPT_FAILED` events are only emitted for orders that returned. The
+column is structurally unavailable for delivered orders. **Logged as an A44-class
+gap: the decision is true of the code and false of the data.**
+
+#### The verdict, and why the shape of it matters
+
+**H6 is untestable as specified.** Its prior was 50% — the least confident in the
+entire pre-registered set — and that caution turns out to have been aimed at the
+wrong risk. The hypothesis did not fail; it could not be run.
+
+The truth file's ledger says realised delay carries **0.22 per day** in the
+post-dispatch shock against promise's **0.11**, so delay does dominate, roughly
+2:1 — *but that comes from the planted parameters, not from the analysis*, and it
+would be unavailable in any real version of this work.
+
+**Product read.** What the data can support is narrower than Phase 1 hoped and
+still decision-relevant: the promise-length lever is worth roughly **+1.8pp of
+RTO per extra promised day** at the honest specification, and most of what looks
+like a promise effect is really a *geography* effect. Shortening promises in
+hard-to-serve pincodes without changing the underlying logistics would move
+almost nothing. **That is a logistics conclusion reached from checkout data, and
+it argues against a checkout intervention** — which is what makes it worth
+reporting.
+
+---
+
+### D.6 H11 — payment failure as a cause of COD · **BELOW PRIOR, but the consequence is larger than the share**
+
+| | |
+|---|---:|
+| COD orders preceded by a failed prepaid attempt | **5.90%** (3,882 of 65,827) |
+| Prior | 8–15% |
+
+**Mechanism for the miss** (decision A35): the payment-failure parameters were
+set from plausible external gateway ranges, while the 8–15% prior was an
+independent guess about the outcome. The two were never reconciled, and Phase 2's
+spec §10.3 predicted the mismatch in advance.
+
+#### The consequence, which the headline share understates
+
+Switch-COD orders and intent-COD orders are not the same population:
+
+| Population | Orders | RTO rate |
+|---|---:|---:|
+| Intent COD (chose it) | 52,781 | **24.34%** |
+| **Switch COD (pushed into it)** | **3,435** | **7.89%** |
+| Prepaid | 35,034 | 5.61% |
+| Difference, switch − intent | | **−16.45pp** [−17.43, −15.48] |
+
+**A customer pushed into COD by a payment failure behaves almost like a prepaid
+customer, not like a COD customer.** At 7.89% they sit 2.3pp from the prepaid
+rate and 16.5pp from the intent-COD rate.
+
+That is exactly what the causal story predicts: they *wanted* to prepay. They
+carry the low-risk disposition that goes with prepaid intent, and the payment
+rail failed them. Their COD status is an accident of infrastructure, not a
+revealed preference.
+
+**Product read — the intervention is worth more than its 5.90% size suggests,
+and less than a naive reading of that would imply.** Fixing payment reliability
+recovers the *better* half of the COD book: 3,435 orders that were already going
+to behave well. So the RTO saving is small — these orders were not going to
+return anyway. The real prize is different and larger:
+
+- **1,247 sessions abandoned outright at payment failure** (§A.3) — pure lost
+  demand, no COD order to salvage.
+- **3,882 orders forced onto the dearer rail**: COD carries handling and
+  failed-attempt costs a prepaid order does not, and COD orders earn ₹10.33 per
+  resolved order against prepaid's ₹96.09 (§B.6).
+
+The case for payment reliability is a **margin-mix and lost-demand** case, not an
+RTO case. It remains the only intervention in the library with zero conversion
+risk and zero margin cost — but it should be sold on the right benefit.
+
+---
+
+### D.7 What this data cannot settle
+
+Phase 1 §3 identifies three problem-tree branches with **no observational
+variation to exploit**. This is not a gap in the analysis; it is the reason the
+project needs an experiment, and naming these precisely is the bridge to Phase 6.
+
+| Branch | Hypothesis | Why observation cannot reach it | Variation an experiment must create |
+|---|---|---|---|
+| **Checkout — trust signals** | **H7**: trust badges shift COD → prepaid | Every session sees the identical checkout. There is no variation in trust-signal presence anywhere in the data, so the effect is not merely confounded — it is **unidentified**. No sample size and no adjustment can help | Randomise trust-signal presence at the payment step. Primary metric CM/CSS, secondary prepaid share |
+| **Behavioural — zero-collateral commitment** | The core COD mechanism: paying nothing at commitment creates a free option to refuse | This is exactly the residual §C could not recover. It lives in `latent_intent`, which is unobservable by construction. Payment method is *chosen*, so no observational contrast isolates the collateral effect from the disposition that produced the choice | **Exogenous variation in prepayment requirement.** A partial-payment arm (e.g. ₹100 at checkout) is the only design that moves collateral while holding disposition fixed. This is the instrument §C.6 says does not exist in the data |
+| **Checkout — COD as the visual default** | Position and pre-selection drive COD share | The interaction design is a constant. Nothing in the event stream records where COD sat on the page, because it always sat in the same place | Randomise payment-option ordering and pre-selection. Guardrail on low-risk-segment conversion |
+
+**A fourth, discovered here rather than predicted: H6's realised-delay effect
+(§D.5).** Phase 1 expected this to be answerable observationally. It is not — but
+for a different reason than the three above. Trust, collateral and defaults are
+unidentified because *the world does not vary*. H6 is unidentified because *the
+warehouse publishes the variable conditional on the outcome*. The first three
+need an experiment; H6 needs a schema change.
+
+That distinction is worth keeping. **"We cannot answer this" has at least two
+causes, and only one of them is expensive to fix.**
+
+#### What this means for how the findings should be spoken about
+
+The three experimental branches are precisely the ones where the intuitive
+product story is strongest — trust, friction, commitment. That is not a
+coincidence. They are compelling *because* they are mechanisms rather than
+correlations, and they are unmeasurable *because* mechanisms need variation that
+a passive warehouse does not contain.
+
+So the honest position at the end of Phase 3 is: **the analysis can rank the
+interventions whose drivers are observable, and it can size the prize. It cannot
+tell you whether trust signals work, whether partial payment changes behaviour,
+or whether the COD default matters — and any confidence about those comes from
+priors, not from this data.**
+
+---
+
 ## Corrections made to this document
 
 Logged rather than silently fixed, because a figure caught before review is
@@ -638,17 +1053,10 @@ toward your case, it is just wrong.
 
 ## What is not settled here
 
-Section B measures *association* between payment method and RTO. It cannot
-separate causation from selection, and nothing above should be read as a claim
-that switching a customer from COD to prepaid would recover ₹146 Cr. Section C
-addresses exactly that, and the honest answer is already known to be partial.
-
-Three problem-tree branches — customer trust, checkout friction, behavioural
-collateral — have **no observational variation to exploit** and cannot be settled
-by any query in this library (Phase 1 §3). Naming them is the bridge to Phase 6,
-not a gap in Phase 3.
-
----
+Section **C** establishes that the causal share of the COD–RTO association
+cannot be identified from observational data, however many confounders are
+controlled. Section **D.7** enumerates the four questions this warehouse cannot
+answer and what each would need.
 
 ## Artefacts
 
@@ -663,6 +1071,7 @@ not a gap in Phase 3.
 | `sql/12_hypotheses.sql` | Q11–Q13 — raw crosstab, stratified cells, the three standardisations |
 | `src/analysis/h1_decomposition.py` | Section C — all four estimates plus the GT-03 rule |
 | `notebooks/05_rto_analysis.ipynb` | Sections B and C |
+| `src/analysis/hypotheses.py` | Section D — H2–H6 and H11 |
 
 Q1–Q13 of the Phase 1 §15 "SQL library (13 queries)" are written. The blueprint
 names the count but never enumerates the thirteen, so the split across files is a

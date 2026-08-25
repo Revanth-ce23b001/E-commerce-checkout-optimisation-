@@ -42,6 +42,14 @@ ever read one order at a time (limitation **L12**). The `KNOWN_EMPTY` registry i
 now empty; a stricter `PARTIAL_BY_DESIGN` check enforces that the trace is
 present in exactly the rows the flag claims.
 
+**Phase 3 (diagnostic analysis) is complete.** `reports/phase3_findings.md`
+carries the funnel, the RTO waterfall, the H1 causal decomposition and the
+H2–H6/H11 hypothesis tests. Headline: checkout conversion 68.13% against net
+conversion 56.87% on the resolved basis; ₹167.79 Cr annual RTO exposure of which
+61.44% is addressable; and the naive COD–RTO gap of 17.73pp falls to 10.67pp
+after adjustment against a planted truth of 9.99pp — **an association that
+survives adjustment, not a causal quantity**.
+
 ## Source of truth
 
 | File | Role |

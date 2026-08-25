@@ -259,6 +259,62 @@ def main() -> int:
     (resolved,), = query("SELECT count(*) FROM analytics.vw_rto_base;")
     c.eq("H1 population = shipped AND NOT censored", resolved, len(population))
 
+    # -- D: hypothesis descriptives ---------------------------------------
+    print("\nD  hypothesis descriptives")
+    from src.analysis import hypotheses as Hy
+
+    hyp = pd.read_parquet(REPO_ROOT / "data" / "processed" / "hypotheses_population.parquet")
+
+    (cod_new, cod_est), = query("""
+        SELECT avg((o.payment_method='COD')::int::numeric) FILTER (WHERE s.pit_is_new_customer),
+               avg((o.payment_method='COD')::int::numeric) FILTER (WHERE NOT s.pit_is_new_customer)
+        FROM analytics.fct_order o
+        JOIN analytics.fct_customer_state_at_session s ON s.session_id = o.session_id;""")
+    h2 = Hy.h2_new_customer_cod(hyp)
+    c.eq("H2 cod share, new", cod_new, h2["cod_share_new"], RATE_TOL)
+    c.eq("H2 cod share, established", cod_est, h2["cod_share_established"], RATE_TOL)
+    c.eq("H2 lift (pp)", (float(cod_new) - float(cod_est)) * 100, h2["lift_pp"], RATE_TOL)
+
+    (with_prior, without), = query("""
+        SELECT avg((o.rto_flag)::int::numeric) FILTER (WHERE s.pit_rto_count > 0),
+               avg((o.rto_flag)::int::numeric) FILTER (WHERE s.pit_rto_count = 0)
+        FROM analytics.fct_order o
+        JOIN analytics.fct_customer_state_at_session s ON s.session_id = o.session_id
+        WHERE o.is_shipped AND NOT o.is_censored;""")
+    h3 = Hy.h3_prior_rto_lift(hyp)
+    c.eq("H3 rto rate, prior RTO", with_prior, h3["rto_rate_with_prior"], RATE_TOL)
+    c.eq("H3 rto rate, no prior", without, h3["rto_rate_without"], RATE_TOL)
+    c.eq("H3 lift", float(with_prior) / float(without), h3["lift"], 1e-3)
+
+    (switch_rto, intent_rto), = query("""
+        SELECT avg((rto_flag)::int::numeric) FILTER (WHERE paid_via_switch),
+               avg((rto_flag)::int::numeric) FILTER (WHERE NOT paid_via_switch)
+        FROM analytics.fct_order
+        WHERE is_shipped AND NOT is_censored AND payment_method = 'COD';""")
+    h11 = Hy.h11_switch_cod(hyp, tables["fct_checkout_session"])
+    c.eq("H11 rto rate, switch-COD", switch_rto, h11["rto_rate_switch_cod"], RATE_TOL)
+    c.eq("H11 rto rate, intent-COD", intent_rto, h11["rto_rate_intent_cod"], RATE_TOL)
+
+    # H6's observability wall, asserted rather than described: the two delay
+    # measures must be perfectly outcome-determined, or the finding is wrong.
+    (delivered_delay, delivered_attempt, rto_delay, rto_attempt), = query("""
+        SELECT count(o.delivery_delay_days) FILTER (WHERE o.is_delivered),
+               count(d.ad)                  FILTER (WHERE o.is_delivered),
+               count(o.delivery_delay_days) FILTER (WHERE o.rto_flag),
+               count(d.ad)                  FILTER (WHERE o.rto_flag)
+        FROM analytics.fct_order o
+        LEFT JOIN LATERAL (SELECT max(attempt_delay_days) ad
+                           FROM analytics.fct_delivery_event e
+                           WHERE e.order_id = o.order_id
+                             AND e.attempt_delay_days IS NOT NULL) d ON TRUE
+        WHERE o.is_shipped AND NOT o.is_censored;""")
+    c.eq("H6 delivered orders WITHOUT attempt_delay", delivered_attempt, 0)
+    c.eq("H6 returned orders WITHOUT delivery_delay", rto_delay, 0)
+    c.eq("H6 delivered orders with delivery_delay", delivered_delay,
+         int(hyp[hyp["is_delivered"].fillna(False)]["delivery_delay_days"].notna().sum()))
+    c.eq("H6 returned orders with attempt_delay", rto_attempt,
+         int(hyp[hyp["rto_flag"].fillna(False)]["attempt_delay_days"].notna().sum()))
+
     # -- the leakage boundary is part of the contract ----------------------
     print("\nLK  the analyst role cannot reach the truth schema")
     c.checked += 1
