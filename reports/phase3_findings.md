@@ -917,12 +917,26 @@ model containing realised delay as a predictor of RTO is circular. There is no
 specification that fixes this — it is a property of what was published, not of
 how the model is written.
 
-**This is also a Phase 2 finding.** Decision A8 states that `attempt_delay_days`
-"exists for every shipped order whether it RTOs or not". In the generator it
-does. In the published `fct_delivery_event` it does not, because
-`DELIVERY_ATTEMPT_FAILED` events are only emitted for orders that returned. The
-column is structurally unavailable for delivered orders. **Logged as an A44-class
-gap: the decision is true of the code and false of the data.**
+**This is also a Phase 2 finding, and it was diagnosed rather than worked
+around.** Decision A8 states that `attempt_delay_days` "exists for every shipped
+order whether it RTOs or not". In the generator it does. In the published
+`fct_delivery_event` it does not, because `DELIVERY_ATTEMPT_FAILED` events are
+only emitted for orders that returned.
+
+Three things were checked before concluding, and two of the obvious worries do
+not hold (full diagnosis in **limitation L13**):
+
+| | |
+|---|---|
+| Was the shock coefficient δ₂ multiplying an outcome-conditional variable? | **No.** `delivery_timeline` runs on every order in the batch and the RTO draw happens on the next line, from the probability the delay produced. The A45 component trace confirms it empirically: **749 of 749 sampled delivered orders carry a non-zero `shock.attempt_delay_days`**, mean implied delay 2.06 days |
+| Is the shock term leakage-shaped? | **No.** `attempt_delay_days` is absent from the safe-feature whitelist and from `vw_risk_model_input`; LK-01 passes |
+| Is H6 untestable? | **Yes.** This is the one consequence that stands |
+
+So the data-generating process is sound and the defect is confined to the
+**projection layer** — one `with_delay=True` flag that follows the event type
+rather than the order. **Logged as an A44-class gap: the decision is true of the
+code and false of the data.** Awaiting a ruling on whether to regenerate;
+`fct_order` would be byte-identical, so DQ-01's baseline survives either way.
 
 #### The verdict, and why the shape of it matters
 

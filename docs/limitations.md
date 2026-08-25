@@ -336,39 +336,108 @@ realised worst error is 8.88e-16.
 
 ## L13 — `attempt_delay_days` is published only on orders that RETURNED
 
-Decision **A8** states that `attempt_delay_days` "exists for every shipped order
-whether it RTOs or not". **In the generator it does. In the published database it
-does not.**
+**A projection defect, not a data-generating-process defect.** The distinction
+decides the remedy, so it is established with evidence below rather than
+asserted.
 
-`fct_delivery_event.attempt_delay_days` is carried on `DELIVERY_ATTEMPT_FAILED`
-events, and those events are emitted only for orders that exhausted their
-attempts and went back. The result is a pair of perfectly complementary columns:
+### What is published
 
-| Population | Orders | `fct_order.delivery_delay_days` | `attempt_delay_days` |
-|---|---:|---:|---:|
-| Delivered | 76,166 | 76,166 | **0** |
-| Returned | 15,084 | **0** | 15,084 |
+| Population | Orders | with `attempt_delay_days` |
+|---|---:|---:|
+| Delivered | 76,166 | **0** (0.00%) |
+| Returned (RTO) | 15,084 | **15,084** (100.00%) |
+| Censored | 10,141 | 0 |
+| Cancelled pre-ship | 4,214 | 0 |
 
-**Consequence.** Realised delivery lateness is observable *conditional on the
-outcome it would explain*. Knowing which column is populated identifies the
-outcome with certainty, so no model can use realised delay as a predictor of RTO
-without being circular. **Hypothesis H6 — "the promise-versus-actual gap is the
-real driver, not promise length" — is therefore untestable from the published
-data**, and is recorded as CANNOT SETTLE in `reports/phase3_findings.md` §D.5
-rather than as a failed test.
+It lives on exactly one event type: `DELIVERY_ATTEMPT_FAILED` (45,252 rows, all
+populated). `DELIVERED` carries 76,166 rows and zero delays; so does every other
+event type.
 
-**Class.** This is an **A44-class finding**: a decision that is true of the code
-and false of the data, discovered only when something tried to use the column.
-The 42 data-validation tests do not catch it, because a column that is NULL on a
-principled subset is not a defect by any rule they encode — `attempt_delay_days`
-is legitimately NULL on non-attempt events, and every delivered order is a
-non-attempt order. The check that would catch it is not "is this column ever
-populated" but "**is this column's population independent of the outcome**".
+### Where the generator computes it
 
-**Not fixed in Phase 3.** Fixing it means emitting a delivery-attempt record for
-delivered orders too, which changes `fct_delivery_event` and requires a
-regeneration and reload. That is a Phase 2 change and needs a ruling, not an
-analyst's edit. Logged here so the gap is stated rather than worked around.
+`src/generators/simulate.py`, module 16, inside the day loop:
+
+```python
+timeline = rto_mod.delivery_timeline(p, order_day, ...)          # ALL ord_pos
+shock    = rto_mod.post_dispatch_shock(
+    setup["shock_coef"], courier_z, timeline["attempt_delay_days"], ...)
+final_logit = pre + shock                                        # ALL ord_pos
+drawn = rto_mod.draw_rto(logistic(final_logit), d["u_rto"][ord_pos]) & ship
+```
+
+`delivery_timeline` is called on **`ord_pos` — every order in the batch**, not on
+an RTO subset. The shock is added for every order. **The outcome is drawn on the
+next line, from the probability the delay helped produce.** Line 393 then
+collects the delay for all orders: `collected["attempt_delay"][ord_pos] = ...`.
+
+### What δ₂ actually multiplied
+
+Read from the decision-A45 component trace — the audit sample exists for exactly
+this kind of question:
+
+| Population | Sampled | `shock.attempt_delay_days` non-zero | Mean term | Implied delay |
+|---|---:|---:|---:|---:|
+| **Delivered** | 749 | **749 / 749** | +0.4528 | **2.058 days** |
+| Returned | 1,044 | 1,044 / 1,044 | +0.6758 | 3.072 days |
+
+**δ₂ = 0.22 multiplied a real, non-zero, per-order delay for every delivered
+order.** The variable existed and was used throughout generation. The higher mean
+on returned orders (3.07d against 2.06d) is the planted causal effect showing up
+as a difference in means — which is what a working Stage-2 driver looks like.
+
+### Therefore
+
+| Concern | Verdict |
+|---|---|
+| δ₂ multiplied an outcome-conditional variable (circular) | **No.** The delay is computed for all shipped orders and the outcome is drawn afterwards from it. The causal order is delay → shock → probability → draw |
+| The shock term is partly leakage-shaped | **No.** `attempt_delay_days` is a post-dispatch fact, is absent from `leakage_guard.safe_feature_whitelist`, and does not appear in `vw_risk_model_input`. The firewall is intact and LK-01 passes |
+| **H6 cannot be tested as specified** | **Yes.** This one stands. Realised delay is *published* conditional on the outcome, so no model built on the warehouse can use it without being circular |
+
+### Root cause
+
+The column was hung on an **event type that only exists for failures**. Under
+decision A8 it is a property of the order's *first delivery attempt*, and every
+shipped order has one — but `build_delivery_events` emits an attempt event only
+when the attempt failed. A delivered order's successful first attempt is emitted
+as `DELIVERED`, with `with_delay=False`:
+
+```python
+emit(observable & delivered, "DELIVERED", days_to_resolve.astype(float))          # no delay
+emit(observable & rto, "DELIVERY_ATTEMPT_FAILED", offset, ..., with_delay=True)   # delay
+```
+
+The rename away from `delivery_delay_days` was specifically intended to make the
+column outcome-independent. The rename happened; the emission did not follow it.
+
+### Fix options, for a ruling
+
+The delay is already collected for every order and is in scope inside
+`build_delivery_events` as `attempt_delay = extra["attempt_delay"][idx]`, so no
+new quantity has to be computed.
+
+| Option | Change | Consequence |
+|---|---|---|
+| **(a)** Pass `with_delay=True` on the `DELIVERED` emit | one flag | Populates 76,166 existing rows. The DDL comment "NULL on non-attempt events" still holds — a successful delivery *is* an attempt |
+| **(b)** Emit a `DELIVERY_ATTEMPT_SUCCEEDED` event for delivered orders | new event type | +76,166 rows; changes the event enum and the DQ event-sequence expectations |
+| **(c)** Move `attempt_delay_days` onto `fct_order` | schema move | Contradicts A8's own placement ruling and spec §3.11 |
+
+**Regeneration cost is low and DQ-01 survives.** `fct_delivery_event` is a leaf
+projection; nothing downstream reads it. No order-grain value changes, so
+`fct_order`'s content hash stays byte-identical and the DQ-01 baseline does not
+need re-establishing. The reload and the 68-assertion cross-check would re-run.
+
+**Not fixed here.** This is a Phase 2 change to a published table and needs a
+ruling, not an analyst's edit. H6 stays **CANNOT SETTLE** in
+`reports/phase3_findings.md` §D.5 until it is made.
+
+### Class
+
+An **A44-class finding**: a decision true of the code and false of the data,
+found only when something tried to use the column. The 42 data-validation tests
+cannot catch it — a column that is NULL on a principled subset violates no rule
+they encode, and `attempt_delay_days` *is* legitimately NULL on non-attempt
+events. The check that would catch it is not "is this column ever populated" but
+"**is this column's population independent of the outcome**".
 
 **What is not lost.** The promise side of H6 is fully testable and is measured
 (§D.5): +1.8pp of RTO per extra promised day at the honest specification, with
