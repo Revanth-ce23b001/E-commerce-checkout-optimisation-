@@ -210,6 +210,55 @@ def main() -> int:
     c.eq("cash out the door Cr", cash, w["cash_cr"], CR_TOL)
     c.eq("addressable Cr", addressable, w["addressable_cr"], CR_TOL)
 
+    # -- C: H1 decomposition ----------------------------------------------
+    print("\nQ11-Q13  H1 decomposition")
+    import pandas as pd
+    from src.analysis import h1_decomposition as H
+
+    population = pd.read_parquet(REPO_ROOT / "data" / "processed" / "h1_population.parquet")
+    sql_raw = dict((m, (n, r)) for m, n, r in query("""
+        SELECT payment_method, count(*) FILTER (WHERE rto_flag),
+               count(*) FILTER (WHERE rto_flag)::numeric / count(*)
+        FROM analytics.vw_rto_base GROUP BY 1;"""))
+    py_raw = H.raw_crosstab(population)
+    c.eq("COD rto rate", sql_raw["COD"][1], py_raw["cod_rate"], RATE_TOL)
+    c.eq("PREPAID rto rate", sql_raw["PREPAID"][1], py_raw["prepaid_rate"], RATE_TOL)
+    c.eq("raw gap (pp)",
+         (float(sql_raw["COD"][1]) - float(sql_raw["PREPAID"][1])) * 100,
+         py_raw["estimate_pp"], RATE_TOL)
+
+    # The three standardisations. Weighting choice moves this by 3.7pp, so all
+    # three are checked rather than only the one being quoted.
+    (cells, att, ate, atu), = query("""
+        WITH cells AS (
+            SELECT CASE WHEN s.pit_orders_delivered = 0 THEN '0'
+                        WHEN s.pit_orders_delivered <= 2 THEN '1-2'
+                        WHEN s.pit_orders_delivered <= 5 THEN '3-5'
+                        WHEN s.pit_orders_delivered <= 15 THEN '6-15'
+                        ELSE '16+' END AS tenure, b.geo_tier,
+                   count(*) FILTER (WHERE b.payment_method = 'COD') n_cod,
+                   count(*) FILTER (WHERE b.payment_method = 'PREPAID') n_prepaid,
+                   avg((b.rto_flag)::int::numeric) FILTER (WHERE b.payment_method='COD') cod_rate,
+                   avg((b.rto_flag)::int::numeric) FILTER (WHERE b.payment_method='PREPAID') prepaid_rate
+            FROM analytics.vw_rto_base b
+            JOIN analytics.fct_order o USING (order_id)
+            JOIN analytics.fct_customer_state_at_session s ON s.session_id = o.session_id
+            GROUP BY 1, 2),
+        kept AS (SELECT n_cod, n_prepaid, (cod_rate - prepaid_rate) * 100 gap_pp
+                 FROM cells WHERE n_cod >= 30 AND n_prepaid >= 30)
+        SELECT count(*), sum(gap_pp*n_cod)/sum(n_cod),
+               sum(gap_pp*(n_cod+n_prepaid))/sum(n_cod+n_prepaid),
+               sum(gap_pp*n_prepaid)/sum(n_prepaid) FROM kept;""")
+    py_strat = H.stratified(population)
+    c.eq("stratified cells used", cells, py_strat["cells_used"])
+    c.eq("stratified ATT  (cod-weighted)", att, py_strat["estimate_att_cod_weighted_pp"], RATE_TOL)
+    c.eq("stratified ATE  (pooled)", ate, py_strat["estimate_ate_pooled_weighted_pp"], RATE_TOL)
+    c.eq("stratified ATU  (prepaid-weighted)", atu, py_strat["estimate_atu_prepaid_weighted_pp"], RATE_TOL)
+
+    # The H1 population itself must be the RTO denominator, not orders placed.
+    (resolved,), = query("SELECT count(*) FROM analytics.vw_rto_base;")
+    c.eq("H1 population = shipped AND NOT censored", resolved, len(population))
+
     # -- the leakage boundary is part of the contract ----------------------
     print("\nLK  the analyst role cannot reach the truth schema")
     c.checked += 1

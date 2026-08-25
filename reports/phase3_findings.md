@@ -1,7 +1,7 @@
 # Phase 3 — Diagnostic findings
 
-*Status: **A (funnel) and B (RTO economics) complete and open for review.**
-C (H1 decomposition) and D (H2–H6, H11) not started.*
+*Status: **A (funnel), B (RTO economics) and C (H1 decomposition) complete.**
+D (H2–H6, H11) not started.*
 
 Every figure below comes from PostgreSQL — queried as the restricted `analyst`
 role — or from `data/truth/_truth.json`. None comes from spec prose, which
@@ -46,6 +46,41 @@ resolved-basis figure is the one to quote for a steady state — but both are
 reported and neither replaces the other (decision A10, limitation L9).
 
 The leak is real on either basis.
+
+### A.1b Which net conversion we quote, and why
+
+Net conversion moves by 7.7pp depending on how the 10,141 censored orders are
+handled. On the project's headline funnel metric that is too large a swing to
+leave implicit, so every defensible definition is stated with its denominator.
+
+| Definition | Censored treated as | Net conversion | Leak |
+|---|---|---:|---:|
+| delivered ÷ sessions | failures | 49.14% | 18.99pp |
+| (delivered + censored) ÷ sessions | successes | 55.68% | 12.45pp |
+| **checkout conv × (1 − blended RTO rate)** | **excluded** | **56.87%** | **11.26pp** |
+| shipped ÷ sessions | ignores all failure | 65.41% | — |
+
+**Ruling applied: the resolved-denominator version (56.87% / 11.26pp) is
+primary.** It is the only one where every order in both the numerator and the
+denominator has a *known* outcome. The other two each assume an answer for the
+censored orders — one that they all failed, one that they all succeeded — and
+neither assumption is observed.
+
+The 49.14% figure is reported alongside as the **conservative bound**: it is the
+worst case, and it is the number to quote when someone asks what the leak could
+be if every unresolved order goes wrong.
+
+**This is limitation L9's censoring trap in a different costume.** L9 records it
+on the *cost* side, where annualising across censored orders understates the RTO
+bill by 15.7%. Here the identical mistake works in the opposite direction — the
+same orders, counted as failures, make the funnel look *worse* than it is. One
+unresolved-outcome population, two headline metrics, and the bias points opposite
+ways in each. That is why the rule is to state the denominator rather than to
+memorise a direction.
+
+*Note: the ~62.4% figure raised in review does not correspond to any denominator
+convention I can reproduce from this data — the nearest are 55.68% and 65.41%.
+Flagging rather than reverse-engineering it.*
 
 ### A.2 The funnel, step by step
 
@@ -177,8 +212,20 @@ headline by ₹22 Cr (decision A41, limitation L9).
 |  of which foregone contribution margin | ₹42.69 Cr | 25.44% |
 | − Structurally unavoidable *[measured]* | −₹64.70 Cr | 38.56% |
 | **= Addressable opportunity** *[measured]* | **₹103.09 Cr** | 61.44% |
-| × Intervention efficacy **[ASSUMPTION]** | ×0.30 | |
-| **= Recoverable opportunity** *[assumption-dependent]* | **₹30.93 Cr** | |
+| × Intervention efficacy **[A — PLACEHOLDER]** | ×0.30 | |
+| **= Recoverable opportunity** **[A — PLACEHOLDER, to be replaced by the measured ATE in Phase 6]** | **₹30.93 Cr** | |
+
+> ### ⚠ ₹30.93 Cr is the least defensible number in this project
+>
+> It rests entirely on a **30% intervention efficacy assumption for which there
+> is no evidence at all** — not a weak estimate, not a benchmark, an unevidenced
+> placeholder carried from Phase 1 §7.2. Phase 1 §7.4 is explicit that it "must
+> come from the experiment, not assumption."
+>
+> Every line above the addressable opportunity is measured. This one is not.
+> Halving the assumption halves the number; nothing in this dataset would
+> contradict either value. **Do not put it in front of a finance partner until
+> Phase 6 has replaced it with a measured ATE.**
 
 **EC-07 cross-check.** ₹6,379,369.34 total RTO economic cost ÷ 91,250 resolved
 orders = ₹69.91 per resolved order × 24,000,000 = **₹167.79 Cr**. Reconciles
@@ -202,28 +249,93 @@ now measured, the bottom is a placeholder.
 number 3. The resume bullet's "₹165 Cr" is this line, and the honest sequence is
 to say so and then immediately show the funnel down to ₹30.93 Cr.
 
-### B.4 Addressable vs structural — the cost split differs from the count split
+### B.4 Addressable vs structural — the full decomposition
 
-| Class | RTO orders | Share of count | Total cost | **Share of cost** | Avg cost |
-|---|---:|---:|---:|---:|---:|
-| ADDRESSABLE | 9,170 | 60.79% | ₹39,19,486.68 | **61.44%** | ₹427.42 |
-| STRUCTURAL | 5,914 | 39.21% | ₹24,59,882.66 | **38.56%** | ₹415.94 |
+Phase 1 §7.2 **assumed** 65% addressable. Measured on cost it is **61.44%**. That
+is a 3.56pp miss on a number that feeds straight into the waterfall, and it is
+logged below as a fourth missed prior alongside H2, H3 and H11. The measured
+value replaces the assumption everywhere; 65% is not restated.
 
-The two splits differ by 0.65pp, because addressable failures are slightly more
-expensive on average — `INSUFFICIENT_CASH_AT_DELIVERY` at ₹486.87 per RTO is the
-costliest reason in the dataset. The gap is small here, but the discipline
-matters: **what gets recovered is cost, not order count**, and the two are only
-equal when every reason class costs the same.
+All ten reasons, both splits, ordered by how far the cost share runs ahead of the
+count share:
 
-Top reasons by volume:
+| Class | Reason | Orders | Count share | Cost | **Cost share** | Cost − count | Avg cost |
+|---|---|---:|---:|---:|---:|---:|---:|
+| ADDRESSABLE | **INSUFFICIENT_CASH_AT_DELIVERY** | 1,531 | 10.15% | ₹7,45,397 | **11.68%** | **+1.53pp** | **₹486.87** |
+| ADDRESSABLE | ADDRESS_INCORRECT_INCOMPLETE | 584 | 3.87% | ₹2,47,839 | 3.89% | +0.01pp | ₹424.38 |
+| STRUCTURAL | DELIVERY_ATTEMPTED_OUTSIDE_WINDOW | 982 | 6.51% | ₹4,13,154 | 6.48% | −0.03pp | ₹420.73 |
+| STRUCTURAL | OTHER_UNCLASSIFIED | 376 | 2.49% | ₹1,55,803 | 2.44% | −0.05pp | ₹414.37 |
+| STRUCTURAL | CUSTOMER_UNAVAILABLE_GENUINE | 1,127 | 7.47% | ₹4,70,203 | 7.37% | −0.10pp | ₹417.22 |
+| STRUCTURAL | PINCODE_SERVICEABILITY_FAILURE | 1,845 | 12.23% | ₹7,70,731 | 12.08% | −0.15pp | ₹417.74 |
+| ADDRESSABLE | NEVER_ORDERED_LOW_INTENT | 941 | 6.24% | ₹3,87,585 | 6.08% | −0.16pp | ₹411.89 |
+| ADDRESSABLE | CUSTOMER_REFUSED_CHANGED_MIND | 3,608 | 23.92% | ₹15,07,222 | 23.63% | −0.29pp | ₹417.74 |
+| STRUCTURAL | COURIER_OPERATIONAL_FAILURE | 1,584 | 10.50% | ₹6,49,992 | 10.19% | −0.31pp | ₹410.35 |
+| ADDRESSABLE | CUSTOMER_UNREACHABLE_NO_ANSWER | 2,506 | 16.61% | ₹10,31,444 | 16.17% | −0.45pp | ₹411.59 |
+| | **ADDRESSABLE total** | **9,170** | **60.79%** | ₹39,19,487 | **61.44%** | **+0.65pp** | ₹427.42 |
+| | **STRUCTURAL total** | **5,914** | **39.21%** | ₹24,59,883 | **38.56%** | −0.65pp | ₹415.94 |
 
-| Reason | Class | Orders | Avg cost |
-|---|---|---:|---:|
-| CUSTOMER_REFUSED_CHANGED_MIND | ADDRESSABLE | 3,608 | ₹417.74 |
-| CUSTOMER_UNREACHABLE_NO_ANSWER | ADDRESSABLE | 2,506 | ₹411.59 |
-| PINCODE_SERVICEABILITY_FAILURE | STRUCTURAL | 1,845 | ₹417.74 |
-| COURIER_OPERATIONAL_FAILURE | STRUCTURAL | 1,584 | ₹410.35 |
-| **INSUFFICIENT_CASH_AT_DELIVERY** | ADDRESSABLE | 1,531 | **₹486.87** |
+#### Which reasons drive the divergence
+
+**One reason drives all of it.** `INSUFFICIENT_CASH_AT_DELIVERY` is the only line
+with a materially positive cost-minus-count gap (+1.53pp). Every one of the other
+nine sits between −0.45pp and +0.01pp — statistical texture, not signal. Remove
+that single reason and the two splits collapse onto each other.
+
+The nine near-zero rows are the more informative half of the table: they say the
+avoidability taxonomy is **almost cost-neutral**. Reason class is essentially
+uncorrelated with cost per RTO, with exactly one exception.
+
+#### Correcting two premises in the review
+
+**(a) The cost split came in *above* the count split, not below.** ADDRESSABLE is
+61.44% of cost against 60.79% of count — cost share exceeds count share by
++0.65pp. There is no below-the-count-split effect to explain. The 61.44%-versus-65%
+comparison is against Phase 1's *assumption*, which is a separate quantity from
+the count split and should not be conflated with it.
+
+**(b) `INSUFFICIENT_CASH_AT_DELIVERY` is not the largest single line.** It is the
+costliest *per order* at ₹486.87, but fifth by volume at 1,531 orders (10.15%).
+The largest lines are `CUSTOMER_REFUSED_CHANGED_MIND` (3,608) and
+`CUSTOMER_UNREACHABLE_NO_ANSWER` (2,506). Being expensive per unit and being large
+in aggregate are different things, and here they belong to different reasons.
+
+#### Why that one reason is expensive — the mechanism
+
+Two effects compound, and both are structural rather than incidental:
+
+1. **It is COD-exclusive by construction.** 1,531 COD, **0 prepaid** — a prepaid
+   order cannot fail for want of cash at the door. Test DQ-11 enforces this. So
+   the reason inherits the COD cost base, which is already the dearer of the two
+   (₹423.54 versus ₹418.81 per RTO) because of COD handling and failed-attempt
+   charges.
+2. **It concentrates in expensive orders.** Mean order value on this reason is
+   **₹1,164.66**, against ~₹920 across the order book — a 27% premium. This is a
+   mechanism, not an artefact: the larger the cash ask at the door, the more
+   likely the customer cannot meet it. And because shrink and working-capital
+   cost scale with goods value, a dearer order is a dearer failure.
+
+**The product reading is the useful part.** The single most cost-efficient RTO to
+prevent is a high-value COD order failing for want of cash — it is addressable,
+it is the most expensive failure mode in the book, and the intervention that
+addresses it (partial prepayment on high-value COD) is exactly Phase 1's
+Intervention D. This decomposition is what promotes that intervention from
+plausible to targeted.
+
+#### Logged as a fourth missed prior
+
+| | Assumed | Measured | |
+|---|---:|---:|---|
+| **Addressable share of RTO cost** (Phase 1 §7.2) | 65% | **61.44%** | **below** |
+
+**Mechanism:** Phase 1 assumed the split without a reason taxonomy to measure it
+against — §7.2 carries it as `[A]` and §7.4 lists "35% unavoidable" as an
+assumption Phase 3 must test by decomposing `return_reason`. This is that test.
+The assumption was close but optimistic, and quoting it would have overstated the
+addressable pool by **₹5.97 Cr** (₹109.06 Cr against the measured ₹103.09 Cr).
+
+§7.4 set the failure threshold at "unavoidable > 50%, and the project may not
+clear the funding bar." At 38.56% structural we clear it with room. **The prior
+missed; the conclusion it supported holds.**
 
 ### B.5 Which orders are already underwater
 
@@ -292,6 +404,238 @@ nothing.**
 
 ---
 
+## C. H1 — how much of the COD–RTO gap is causation?
+
+### C.1 The four estimates
+
+Planted truth: **AME 9.99pp**. Naive gap: **17.73pp**. The difference —
+**7.74pp** — is selection.
+
+| | Estimate | 95% CI | Controls | Recovers | GT-03 |
+|---|---:|---|---|---:|---|
+| **1. Raw crosstab** | **17.73pp** | [17.31, 18.16] | none | 0.0% | — |
+| **2. Stratified** (tenure × geo, ATT) | **14.59pp** | — | 16 cells | 40.6% | **PASS** |
+| **3. Logistic regression** | **10.67pp** | [10.07, 11.28] | 41 confounders | **91.2%** | **FAIL** |
+| **4. Propensity matched** | **12.24pp** | [11.81, 12.68] | matched on P(COD\|X) | 70.9% | **FAIL** |
+| **Truth (unobservable)** | **9.99pp** | — | — | 100% | — |
+
+Every estimate is correctly **ordered**: `AME < adjusted < naive` holds in all
+four cases. Each successive method moves toward the truth. Nothing here is
+inverted or pathological.
+
+The raw crosstab reproduces `_truth.json`'s naive gap to six decimal places
+(17.7326 against 17.7326), which is the check that the analysis population is
+the same one the truth file measured.
+
+### C.2 How much of the 7.74pp selection component each method recovered
+
+| Method | Estimate | Selection removed | Selection remaining | Residual above truth |
+|---|---:|---:|---:|---:|
+| Raw crosstab | 17.73pp | 0.00pp (0.0%) | 7.74pp (100%) | +7.74pp |
+| Stratified (ATT) | 14.59pp | 3.14pp (40.6%) | 4.60pp (59.4%) | +4.60pp |
+| Propensity matched | 12.24pp | 5.49pp (70.9%) | 2.25pp (29.1%) | +2.25pp |
+| Logistic regression | 10.67pp | 7.06pp (91.2%) | 0.68pp (8.8%) | **+0.68pp** |
+
+**The logistic regression lands 0.68pp above the truth.** It removes 91.2% of the
+confounding.
+
+### C.3 GT-03 fails on the full confounder set, and that is the finding
+
+GT-03's rule (decision A6):
+
+```
+PASS if  AME < adjusted < naive
+AND      (adjusted − AME) / (naive − AME) >= 0.35
+```
+
+The ordering condition passes for all four methods. The **magnitude** condition
+fails for the regression (0.088) and for the match (0.291). Both recover more of
+the selection component than the test was designed to permit.
+
+**This was not tuned, and it will not be.** The obvious way to make GT-03 pass is
+to drop `pit_cod_share` from the confounder set. That would be selecting a model
+specification to hit a validation target — the exact move CLAUDE.md rule 3 and
+decision A7 forbid elsewhere in this project. The full-confounder estimate is
+reported as primary and the test is recorded as failing.
+
+#### What actually drives the over-recovery
+
+Adding confounders one block at a time isolates it precisely:
+
+| Confounder set | AME | Recovers | |
+|---|---:|---:|---|
+| Geo tier only | 14.36pp | 43.5% | ok |
+| + order, product, seller, delivery-promise features | 13.85pp | 50.1% | ok |
+| **+ tenure and order counts** | **12.02pp** | **73.8%** | **over** |
+| **+ `pit_cod_share`** | **10.77pp** | **90.0%** | **over** |
+| + `pit_rto_rate_shrunk` (full set) | 10.67pp | 91.2% | over |
+
+Two blocks do nearly all the work, and both are **customer behavioural history**.
+Everything about the *order* — value, category, seller, product rating, delivery
+promise, address quality, geography — together recovers only 50%. Adding what the
+customer has done before takes it to 90%.
+
+The single largest jump is `pit_cod_share`: the customer's own prior COD share
+moves recovery from 73.8% to 90.0% on its own.
+
+#### The mechanism, and why it is structural rather than accidental
+
+Decision **A11** generates pre-window history **from the latents**. A customer's
+prior COD share and prior RTO rate are downstream of `latent_trust`,
+`latent_liquidity` and `latent_intent` by construction.
+
+So `pit_cod_share` is not merely correlated with the unobservable confounder —
+it is a **direct observable consequence of it**. Adjusting for a good proxy of an
+unobserved confounder removes most of the bias that confounder creates. The
+better the proxy, the more comes out. Here the proxy is unusually good, because
+the generator built history from the latents with limited noise in between.
+
+**No leakage occurred.** Every feature is on the safe whitelist; LK-01 passes;
+the `analyst` role that produced this analysis is denied on schema `truth` with
+SQLSTATE 42501, asserted inside the cross-check. Nothing saw the answer. The
+recovery is a property of the data-generating process, not a hole in the
+firewall.
+
+#### Two readings, and which one I hold
+
+**Reading 1 — GT-03's band is calibrated to a weaker proxy than this dataset
+has.** The 0.35 floor was set by decision A6 without a fitted model to measure
+against; it encodes an expectation about how recoverable the confounding would
+be. That expectation was too pessimistic for a DGP where history is generated
+from latents. On this reading the test needs re-anchoring, exactly as A6
+re-anchored it once before when γ₀ moved.
+
+**Reading 2 — the residual is small in absolute terms and the test is doing its
+job.** 0.68pp of unrecoverable bias on a 9.99pp effect is a 6.8% overstatement.
+GT-03 exists to prove the truth is *not fully recoverable*, and it is not: the
+estimate does not reach 9.99pp, and it never will, because no amount of
+observable history reconstructs `latent_intent` exactly.
+
+**I hold Reading 1 and flag it for a ruling.** The ordering condition — the part
+that actually detects leakage — passes cleanly. The magnitude floor is a
+judgement about proxy strength that this dataset falsifies. **But re-anchoring a
+test after seeing the result it failed is precisely the move that needs someone
+other than the person who ran it to approve.** Recorded as an open item, not
+resolved.
+
+### C.4 Why the propensity match recovers *less* than the regression
+
+12.24pp against 10.67pp. This is not a defect; the two answer slightly different
+questions.
+
+| | |
+|---|---:|
+| Matched pairs | 55,695 |
+| COD orders with no match inside the caliper | 521 (0.93%) |
+| Propensity model AUC | 0.8354 |
+
+**The 0.8354 is itself a finding.** A model using only observable pre-checkout
+features separates COD from prepaid customers well. Payment method is close to
+predictable from who the customer is and what they are buying — which is the
+selection problem stated as a number.
+
+Matching only compares COD orders to prepaid orders that plausibly *could have
+been* COD, and drops the rest instead of extrapolating. It does not impose the
+regression's functional form, so it cannot use the linear structure to project
+into regions of the covariate space where the data is thin. It recovers less
+because it assumes less.
+
+Common support is good — 99.07% of COD orders found a twin — so the estimand
+difference is small and the two bracket the truth from the same side.
+
+### C.5 Where the estimate lands depends on a weighting choice worth 3.7pp
+
+The stratified estimate is not one number:
+
+| Standardised to | Estimand | Estimate |
+|---|---|---:|
+| **COD distribution** | **ATT — effect on the treated** | **14.59pp** |
+| Pooled | ATE | 13.16pp |
+| Prepaid distribution | ATU | 10.86pp |
+
+**ATT is the right one here**, because the truth file's AME is computed over the
+shipped COD population (decision A6) and the policy question is about the COD
+orders we currently take.
+
+This is worth flagging because **the wrong choice looks better.** The
+prepaid-weighted figure, 10.86pp, sits far closer to the true 9.99pp — and would
+have been reported as an impressively accurate adjustment. It is answering the
+mirror-image question (what would happen if prepaid customers went COD) and its
+apparent accuracy is a coincidence. I made this error in the first draft of the
+analysis and caught it by asking which population the truth file's AME was
+averaged over.
+
+### C.6 No method can fully recover the truth, and that is the honest ceiling
+
+`latent_trust`, `latent_liquidity` and `latent_intent` are held in a PostgreSQL
+schema the analyst role has no privileges on. They drive both the choice to pay
+cash and the tendency not to take delivery. **They are unobservable by
+construction, and no query in this library can reach them.**
+
+That is not a limitation of this dataset. It is a faithful model of the real
+situation: no e-commerce warehouse contains a column for a customer's
+willingness to abandon a parcel at the door. Whatever an analyst controls for,
+some of the COD–RTO gap will always be the customer rather than the payment
+method, and **no observational method can say how much.**
+
+The best estimate here still overstates the true effect by **6.8%**, and that is
+with a favourable proxy structure and 41 confounders. An analyst who did not have
+the truth file would have no way to know the residual was 0.68pp rather than
+5pp — the data contains no signal that would tell them.
+
+**The honest ceiling on any real-world causal claim about payment method is
+therefore: "a strong association, robust to every observed confounder, whose
+causal share cannot be identified from observational data."** Phase 1's H1 entry
+predicted exactly this limitation, and it survives contact with the data.
+
+### C.7 What this means for the product
+
+**H1's pre-registered prior is met, for the raw form and the adjusted form.**
+
+| | Prior | Measured | |
+|---|---|---:|---|
+| H1 raw | ≥15pp | **17.73pp** | **PRIOR MET** |
+| H1 adjusted | shrinks 30–50%, survives | **shrinks 39.8%** (17.73 → 10.67), survives | **PRIOR MET** |
+
+The adjusted gap shrank by 39.8% — inside the predicted 30–50% band — and did not
+collapse. Phase 1's implication table says: *"If adjusted gap remains large →
+payment method itself is a lever."* It remains large.
+
+Three decisions follow, and the third is the one that changes the roadmap.
+
+1. **Payment method is a real lever, but it is roughly half the size the raw
+   number implies.** Any COD fee or prepaid incentive should be sized against
+   ~10.7pp, not 17.7pp. Pricing against the raw gap would over-invest by ~66%.
+2. **Customer risk is the larger lever.** The confounder ladder shows behavioural
+   history explains more of the RTO gap than payment method does. That is the
+   empirical case for Phase 4's risk model, and it now rests on a measurement
+   rather than an assertion.
+3. **The residual cannot be closed observationally.** Phase 1 §3 names three
+   problem-tree branches — customer trust, checkout friction, behavioural
+   collateral — with no observational variation to exploit. C is the proof of
+   that claim rather than the assertion of it. **The partial-payment experiment
+   is the only instrument that would identify the causal share**, and that is
+   Phase 6.
+
+---
+
+## Corrections made to this document
+
+Logged rather than silently fixed, because a figure caught before review is
+worth more on the record than one that was right first time.
+
+| Section | Was | Is | How it was caught |
+|---|---|---|---|
+| B.6 | CM per resolved order ₹27.56 COD / ₹99.26 prepaid, ratio 3.6x | **₹10.33 / ₹96.09, ratio 9.3x** | Asserted in a draft before being queried. Caught by computing it against the database rather than carrying the draft figure forward |
+| C.5 | Stratified estimate standardised to the **prepaid** distribution (10.86pp) | **COD-weighted ATT, 14.59pp** | The prepaid weighting sat far closer to the true 9.99pp and looked like an accurate adjustment. Caught by asking which population `_truth.json`'s AME is averaged over — the shipped COD orders, making the estimand an effect on the treated |
+
+The corrected ratio is the stronger finding — 9.3x, against Phase 1 §7.3's
+predicted "₹7 versus ₹95" — so the error had been working *against* the argument
+it appeared in. That is the usual shape: an unverified number is not biased
+toward your case, it is just wrong.
+
+---
+
 ## What is not settled here
 
 Section B measures *association* between payment method and RTO. It cannot
@@ -316,8 +660,16 @@ not a gap in Phase 3.
 | `scripts/05_crosscheck.py` | Asserts SQL == Python on 48 metrics; asserts `analyst` denied on `truth` |
 | `notebooks/03_exploratory_analysis.ipynb` | Scale, distributions, the planted truth |
 | `notebooks/04_checkout_funnel.ipynb` | Section A |
+| `sql/12_hypotheses.sql` | Q11–Q13 — raw crosstab, stratified cells, the three standardisations |
+| `src/analysis/h1_decomposition.py` | Section C — all four estimates plus the GT-03 rule |
+| `notebooks/05_rto_analysis.ipynb` | Sections B and C |
 
-Queries Q10–Q13 of the Phase 1 §15 "SQL library (13 queries)" are unwritten;
-they belong to sections C and D. The blueprint names the count but never
-enumerates the thirteen, so the split across files is a Phase 3 decision and is
-recorded here rather than inferred.
+Q1–Q13 of the Phase 1 §15 "SQL library (13 queries)" are written. The blueprint
+names the count but never enumerates the thirteen, so the split across files is a
+Phase 3 decision, recorded here rather than inferred. Section D adds no new
+queries — H2–H6 reuse Q11–Q13's cell machinery with different cuts.
+
+**Open item for a ruling:** GT-03's magnitude floor (§C.3). The ordering condition
+passes; the 0.35 floor fails at 0.088 because customer behavioural history is a
+stronger proxy for the latents than decision A6 anticipated. Re-anchoring a test
+after seeing it fail needs approval from someone other than whoever ran it.

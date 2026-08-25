@@ -218,3 +218,43 @@ JOIN analytics.fct_order_economics e USING (order_id)
 CROSS JOIN p
 GROUP BY b.geo_tier, b.payment_method, p.p_star
 ORDER BY rto_rate DESC;
+
+
+-- ---------------------------------------------------------------------------
+-- Q10. AVOIDABILITY, REASON BY REASON  —  cost share vs count share
+--
+-- Business question: which failure reasons carry disproportionate cost, and does
+--   the avoidability taxonomy track cost or only volume?
+-- Product decision: what gets recovered is COST, not order count. A reason that
+--   is 10% of failures and 12% of the bill deserves 12% of the attention. This
+--   query is what promotes an intervention from plausible to targeted.
+--
+-- The answer here is that the taxonomy is almost cost-neutral: nine of ten
+-- reasons sit within +/-0.5pp of their count share. The exception is
+-- INSUFFICIENT_CASH_AT_DELIVERY, which runs +1.53pp ahead because it is
+-- COD-exclusive by construction (test DQ-11 -- a prepaid order cannot fail for
+-- want of cash at the door) AND concentrates in high-value orders, where the
+-- cash ask is largest and the goods-value-scaled costs are highest.
+-- ---------------------------------------------------------------------------
+WITH t AS (
+    SELECT count(*) AS n, sum(rto_economic_cost) AS c
+    FROM analytics.vw_rto_base WHERE rto_flag
+)
+SELECT
+    r.rto_reason_class                                             AS class,
+    r.rto_reason,
+    count(*)                                                       AS orders,
+    round(count(*)::numeric / t.n, 4)                              AS count_share,
+    round(sum(r.rto_economic_cost), 0)                             AS total_cost,
+    round(sum(r.rto_economic_cost) / t.c, 4)                       AS cost_share,
+    -- The divergence. Positive means the reason is dearer than its volume implies.
+    round(sum(r.rto_economic_cost) / t.c - count(*)::numeric / t.n, 4)
+                                                                   AS cost_minus_count,
+    round(avg(r.rto_economic_cost), 2)                             AS avg_cost,
+    -- The two mechanisms behind the one divergent reason, made visible.
+    count(*) FILTER (WHERE r.payment_method = 'COD')               AS cod_orders,
+    round(avg(r.order_value), 2)                                   AS avg_order_value
+FROM analytics.vw_rto_base r CROSS JOIN t
+WHERE r.rto_flag
+GROUP BY r.rto_reason_class, r.rto_reason, t.n, t.c
+ORDER BY cost_minus_count DESC;

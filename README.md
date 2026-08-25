@@ -101,6 +101,12 @@ invocation is always available:
 than SKIPs. That file is gated on **both** the dataset hash and the DDL hash, so
 running these out of order degrades to SKIP rather than reporting a stale PASS.
 
+**Notebooks are verified by execution, not by a kernel.** Jupyter is deliberately
+not in the approved stack, so `notebooks/*.ipynb` are checked by extracting their
+code cells and running them under the project interpreter. A notebook that would
+raise is caught; one that merely has stale saved output is not, which is the
+trade for keeping the dependency list clean.
+
 On macOS/Linux the interpreter is `.venv/bin/python`.
 
 ```bash
