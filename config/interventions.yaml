@@ -1,0 +1,259 @@
+# =============================================================================
+# interventions.yaml - every Phase 5 behavioural assumption, in one file.
+#
+# WHY THIS IS NOT IN params.yaml
+# ------------------------------
+# CLAUDE.md rule 10 says no business literals in src/, and params.yaml is where
+# business literals live. But params.yaml's `dgp_sha256` is a hash of the WHOLE
+# file with solved intercepts stripped, and `_assert_intercepts_match_dgp`
+# refuses to load a file whose DGP hash no longer matches the stamp the
+# calibrator wrote. Appending a Phase 5 block to params.yaml would therefore
+# invalidate five calibrated intercepts and break generation, validation and
+# DQ-01's byte-identical reproducibility check - for parameters that have
+# nothing to do with the data-generating process.
+#
+# So the rule is honoured (no literal in src/) with a second config file. This
+# file is read by src/interventions/ ONLY. Nothing in the generator reads it and
+# nothing here can move a slope, an intercept, or a generated row.
+#
+# [A] vs [D] - THE DISCIPLINE THIS FILE EXISTS TO ENFORCE
+# -------------------------------------------------------
+# Every number below is an [A] BEHAVIOURAL assumption: how customers respond.
+# None of them is an economic quantity. Every economic quantity is [D] - derived
+# per order from config/params.yaml's cost registry and the realised cost draws
+# in fct_order_economics - and none of them appears here.
+#
+# If you find yourself wanting to put a rupee-per-order figure in this file,
+# it belongs in the derivation instead.
+#
+# PROVENANCE. Every `source: blueprint 10.1` figure is a Phase 1 PRIOR, written
+# down before any experiment, to be tested in Phase 6 and to be wrong in public.
+# Anything marked `source: phase5-judgement` has no Phase 1 antecedent and is
+# flagged as such in the report.
+# =============================================================================
+
+meta:
+  version: "1.0.0"
+  phase: 5
+  # The scored population. m2_scores.parquet is the interface phase4_closeout 4
+  # names; it is consumed, never re-fitted.
+  scores: data/processed/m2_scores.parquet
+
+# -----------------------------------------------------------------------------
+# TIER BOUNDARIES - derived from economics, never percentiles (blueprint 8.3)
+#
+# Two lines, and both are solved from the cost model rather than chosen:
+#
+#   HIGH line  = p*, where a COD order's expected CM crosses zero.
+#                DERIVED in _truth.json as breakeven_rto_probability_derived.
+#                Not restated here - a second copy is a copy that can drift.
+#
+#   LOW line   = p_carrot, where the maximum affordable spend to convert a COD
+#                order to prepaid first exceeds the cost of the cheapest PAID
+#                lever. Below it, no paid intervention can create value even
+#                with perfect targeting and zero leakage, so the tier is defined
+#                by "nothing we could buy here is worth buying".
+#
+# blueprint 8.3 pre-committed to 0.10 for the LOW/MED line and justified it with
+# "COD order EV = +65". That is an EV readout, not a derivation - the 0.10 came
+# first. p_carrot is solved instead, and reported against 0.10.
+# -----------------------------------------------------------------------------
+tier_boundaries:
+  carrot_anchor_rupees: 30            # 10.2's incentive. The cheapest PAID lever.
+  blueprint_med_floor: 0.10           # 8.3's pre-committed line, comparison only
+  carrot_anchor_sweep: [25, 30, 50]   # 10.1's stated incentive range
+
+# -----------------------------------------------------------------------------
+# THE LEVER LIBRARY
+#
+# Field meanings, all per TREATED order:
+#   applies_to        cod | failures          which orders the lever can move
+#   target            all | med_high | high   10.1's stated target segment
+#   ranking           global | per_tier       A47 - carrots global, sticks per-tier
+#   restrictive       true => per_tier is mandatory and the 8.4 overlay applies
+#   switch_share      P(COD order becomes prepaid)                       [A]
+#   abandon_relative  P(treated order is not placed at all), stated as a
+#                     relative conversion loss the way 10.1 states it     [A]
+#   abandon_prepaid   P(an already-prepaid order in the cohort is lost)   [A]
+#   prepaid_share_pp  where 10.1 states a POPULATION pp move rather than a
+#                     within-COD switch rate, it is given here and converted to
+#                     a switch rate by dividing by the cohort's COD share
+#   cod_fee_rupees    collected on delivery from COD orders that stay     [A]
+#   incentive_rupees  paid to EVERY prepaid order in the treated cohort   [A]
+#   partial_rupees    upfront token under D                               [A]
+#   commitment_dose   share of the full COD->prepaid causal logit shift a
+#                     partial payment delivers                            [A]
+#   failure_fix_share share of payment failures the routing fix removes   [A]
+# -----------------------------------------------------------------------------
+levers:
+
+  A:
+    name: Prepaid incentive
+    kind: offer
+    restrictive: false
+    ranking: global
+    applies_to: cod
+    target: med_high
+    # 10.1: "with an available prepaid instrument". Without one there is nothing
+    # for the incentive to buy, and paying it anyway is pure leakage.
+    require_saved_instrument: true
+    incentive_rupees: 30
+    source: blueprint 10.1 / 10.2
+    # 10.1: "+15-25pp prepaid share within the targeted cohort"
+    switch_share:     {lo: 0.15, central: 0.20, hi: 0.25}
+    # 10.1: "Neutral to slightly positive (it's a discount)"
+    abandon_relative: {lo: 0.0, central: 0.0, hi: 0.0}
+    abandon_prepaid:  {lo: 0.0, central: 0.0, hi: 0.0}
+
+  B:
+    name: COD fee
+    kind: RESTRICTIVE
+    restrictive: true
+    ranking: per_tier
+    applies_to: cod
+    target: high
+    cod_fee_rupees: 39                 # 10.1: "29-49 convenience fee"
+    source: blueprint 10.1
+    # 10.1: "-20 to -30pp COD share in the targeted cohort"
+    switch_share:     {lo: 0.20, central: 0.25, hi: 0.30}
+    # 10.1: "Negative, -5 to -10% in the targeted cohort" - stated RELATIVE.
+    abandon_relative: {lo: 0.05, central: 0.075, hi: 0.10}
+    abandon_prepaid:  {lo: 0.0, central: 0.0, hi: 0.0}
+
+  C:
+    name: Trust-building checkout
+    kind: offer
+    restrictive: false
+    ranking: global
+    applies_to: cod
+    target: all
+    source: blueprint 10.1
+    # 10.1: "+2-4pp prepaid share" - a POPULATION pp move, not a within-COD rate.
+    prepaid_share_pp: {lo: 0.02, central: 0.03, hi: 0.04}
+    # 10.1: "Neutral or positive". Held at zero: crediting a conversion GAIN to
+    # a messaging change nobody has measured would flatter the cheapest lever in
+    # the library, which is already 10.3's rank-1 on the strength of costing
+    # nothing. If it also gained conversion for free it would win by assumption.
+    abandon_relative: {lo: 0.0, central: 0.0, hi: 0.0}
+    abandon_prepaid:  {lo: 0.0, central: 0.0, hi: 0.0}
+
+  D:
+    name: Partial payment
+    kind: RESTRICTIVE
+    restrictive: true
+    ranking: per_tier
+    applies_to: cod
+    target: high
+    partial_rupees: 99                 # 10.1: "pay 99 now, rest on delivery"
+    # NON-REFUNDABLE ON REFUSAL. 10.1 offers both variants; the token is only a
+    # commitment device if refusing costs something, so the commitment dose and
+    # the retention on RTO have to be assumed together or not at all.
+    partial_retained_on_rto: true
+    source: phase5-judgement (10.1 states a direction, no magnitude)
+    # 10.1 gives D no numbers at all - "converts a meaningful share", "potentially
+    # the largest of any lever". Both parameters below are therefore Phase 5
+    # judgements with no Phase 1 antecedent, and D's row must be read as the
+    # least evidenced line in the table.
+    #
+    # commitment_dose: the share of the FULL COD->prepaid causal logit shift that
+    # a 99-rupee token delivers. 0.6 says a token is most, not all, of what full
+    # prepayment buys - it removes the zero-collateral mechanism but leaves the
+    # customer able to walk away from the balance.
+    commitment_dose:  {lo: 0.40, central: 0.60, hi: 0.80}
+    switch_share:     {lo: 0.0, central: 0.0, hi: 0.0}   # D is not a switch to prepaid
+    # 10.1: "Small negative (extra step, extra decision)"
+    abandon_relative: {lo: 0.03, central: 0.05, hi: 0.08}
+    abandon_prepaid:  {lo: 0.0, central: 0.0, hi: 0.0}
+
+  E:
+    name: Smart payment recommendation
+    kind: RESTRICTIVE                  # decision A48
+    restrictive: true
+    ranking: per_tier
+    applies_to: cod
+    target: all
+    source: blueprint 10.1, reclassified by A48
+    # 10.1: "+3-6pp prepaid via default and salience effects alone"
+    prepaid_share_pp: {lo: 0.03, central: 0.045, hi: 0.06}
+    # NOT AN ESTIMATE - A CONSTRAINT. 10.1: "Neutral IF COD remains reachable in
+    # one tap", and A48 makes the one-tap floor non-negotiable. An arm of E that
+    # loses conversion has taken COD away, which makes it intervention G wearing
+    # E's name and it must be scored as G. Zero here is what the constraint
+    # ASSERTS; a measured conversion loss in Phase 6 is evidence the
+    # implementation breached it, not evidence the assumption was wrong.
+    abandon_relative: {lo: 0.0, central: 0.0, hi: 0.0}
+    abandon_prepaid:  {lo: 0.0, central: 0.0, hi: 0.0}
+    one_tap_constraint: true
+
+  F:
+    name: Payment-reliability routing
+    kind: offer
+    restrictive: false
+    ranking: global
+    applies_to: failures
+    target: all
+    source: blueprint 10.1 - "depends entirely on H11's magnitude"
+    # H11 is MEASURED in _truth.json at 5.9% against an 8-15% prior. F's ceiling
+    # is set by the data, not by this file: it can only move the COD orders that
+    # exist BECAUSE a payment failed (paid_via_switch) and the sessions that
+    # abandoned AT the payment-failure step. The single [A] is how much of that
+    # failure volume better routing removes.
+    failure_fix_share: {lo: 0.30, central: 0.50, hi: 0.70}
+    abandon_relative: {lo: 0.0, central: 0.0, hi: 0.0}
+    abandon_prepaid:  {lo: 0.0, central: 0.0, hi: 0.0}
+
+  G:
+    name: COD gating (COD withdrawn)
+    kind: RESTRICTIVE
+    restrictive: true
+    ranking: per_tier
+    applies_to: cod
+    target: high
+    source: phase5-judgement (not a 10.1 lever; named by the A47 ruling)
+    # THE MOST UNCERTAIN ROW IN THE FILE, and the one the answer is most
+    # sensitive to. Gating is absolute: every treated COD order either becomes
+    # prepaid or does not happen, so switch + abandon = 1 by construction and
+    # ONE number decides the whole lever. Phase 4's policy.py priced gating at
+    # switch = 0 as the conservative floor and swept 0-50%; this widens the
+    # sweep, because 50% is not obviously an upper bound for a hard gate.
+    switch_share:     {lo: 0.25, central: 0.50, hi: 0.75}
+    abandon_prepaid:  {lo: 0.0, central: 0.0, hi: 0.0}
+
+# -----------------------------------------------------------------------------
+# H6 EXCLUSION - stated, not omitted
+#
+# There is no "shorten the delivery promise" lever in this library and there
+# will not be one. GT-06 measured realised delay at 15.4x the deviance of the
+# promise, so the promise is the weak half of the pair; and realised delay is
+# determined AFTER dispatch, which puts it behind the Stage-4 bar for every
+# scoring path in this project.
+#
+# Delay is a real and large RTO driver. It is a LOGISTICS fix - courier mix,
+# dispatch SLA, network coverage - not a checkout intervention, and pretending
+# otherwise would put a lever in the PRD that checkout cannot pull.
+#
+# Recorded here rather than left out, because a silently missing lever reads as
+# an oversight and this one is a ruling.
+# -----------------------------------------------------------------------------
+excluded:
+  H6_shorten_promise:
+    reason: >-
+      Delay is post-dispatch (Stage-4 bar) and is a logistics fix, not a
+      checkout lever. GT-06: realised delay carries 15.4x the deviance of the
+      delivery promise.
+    evidence: GT-06 / blueprint H6 / phase4_closeout 2.3
+
+# -----------------------------------------------------------------------------
+# SENSITIVITY - the two assumptions the whole answer turns on
+# -----------------------------------------------------------------------------
+sensitivity:
+  switch_share_grid:     [0.0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50]
+  abandon_relative_grid: [0.0, 0.025, 0.05, 0.075, 0.10, 0.15, 0.20, 0.30]
+  # The DGP's OWN answer to "what does a fee at checkout do to conversion".
+  # conversion_model carries a planted `shipping_fee_charged_gt0: -0.45` that
+  # never fired, because params.yaml sets shipping_fee_charged: 0. It is the
+  # closest planted analogue to a disclosed checkout fee, and it is marked on
+  # the abandonment sweep as a second anchor beside 10.1's -5 to -10% prior.
+  # Not the central case: it was planted for a SHIPPING fee and nobody
+  # calibrated it against 39 rupees of COD fee.
+  dgp_fee_conversion_logit: -0.45

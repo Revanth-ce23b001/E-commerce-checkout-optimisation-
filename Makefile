@@ -6,7 +6,7 @@ ifeq ($(OS),)
 PY := .venv/bin/python
 endif
 
-.PHONY: help setup test dev generate dryrun validate load verify baseline m1 m2 gt03 all clean
+.PHONY: help setup test dev generate dryrun validate load verify baseline m1 m2 gt03 interventions all clean
 
 # Every target below is a thin wrapper. README documents the direct `python
 # scripts/...` invocation for each, so nothing is blocked on having make installed.
@@ -23,6 +23,7 @@ help:
 	@echo "make m1        - Phase 4: rules baseline + M1  -> reports/phase4_m1.md"
 	@echo "make m2        - Phase 4: M2 + challenger + A47 -> reports/phase4_m2.md"
 	@echo "make gt03      - GT-03 diagnostics (A50)      -> reports/gt03_diagnostics.md"
+	@echo "make interventions - Phase 5: lever simulation + decision table -> reports/phase5_interventions.md"
 	@echo "make all       - generate -> load -> verify -> validate"
 
 setup:
@@ -83,6 +84,12 @@ m2:
 # the Phase 3 analysis must have run. Writes reports/gt03_diagnostics.md.
 gt03:
 	$(PY) scripts/08_gt03_diagnostics.py
+
+# Phase 5 Stage 1. Needs `load` (the view is the only permitted feature
+# source) and `m2` (m2_scores.parquet is the scored population, consumed
+# and never re-fitted). Reads config/interventions.yaml for every [A].
+interventions:
+	$(PY) scripts/09_interventions.py
 
 all: generate load verify validate
 
