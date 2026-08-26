@@ -1559,6 +1559,46 @@ register, with no executing check that the rest of the system honours it. The
 remedy is the same each time — turn the intention into something that runs.
 A44's answer was the load pre-flight; A46's is DQ-15.
 
+#### The third pattern: the unit of declaration must match the unit of the defect
+
+A46 forced this one, and it is distinct from the tautological-check lesson above.
+It is not about *whether* the check has an independent reference — DQ-16's
+allowlist does. It is about the **grain** at which the exception is declared.
+
+> **The unit of declaration must match the unit of the defect.** A46's fix made
+> `attempt_delay_days` legitimately absent on censored orders while requiring it
+> present on delivered ones — so a column-level allowlist would have re-excused
+> the very defect it was written to catch. The sweep had to declare
+> **(column, partition)** pairs.
+
+The trap is that the column-level version reads as the more natural design and
+is one word shorter. `attempt_delay_days: expected to be sparse` is a true
+sentence about the post-fix dataset. It is also exactly the sentence that would
+let the pre-fix dataset back in — the defect and its remedy produce the same
+column-level signature, and only the partition distinguishes them. An exception
+declared one grain too coarse does not weaken the check by a little; it
+subtracts the specific thing the check exists to see.
+
+So the general test for an allowlist entry is not "is this true?" but **"is this
+true at a grain that excludes the failure?"** `config/params.yaml` carries the
+reasoning inline, and `dq16_expected_outcome_conditional` holds
+`table.column@partition` keys for that reason.
+
+**The corroborating evidence for generic detection over targeted fixes.**
+`attempt_number` flagged independently on the first sweep. Emitting it alongside
+`attempt_delay_days` was a judgement call made *during* A46's fix and recorded as
+going "marginally beyond the literal ruling" — the argument being that the DDL
+documents the access pattern as *read from the `attempt_number = 1` row*, so a
+populated delay behind an outcome-conditional attempt number is the same defect
+one layer down. The sweep did not know that argument. It found the column anyway,
+by the same mechanical rule that found the one everybody was looking at.
+
+That is the case for building the generic detector rather than fixing the known
+instance: **a targeted fix is only ever as complete as the person writing it,
+and a generic check independently confirms — or refutes — the judgement calls
+made inside it.** Here it confirmed one. The value would have been identical had
+it refuted one, and higher.
+
 **The rule, stated generally: a check whose reference is derived from the thing
 it checks is not a check.** It is a restatement, dressed as a verification.
 

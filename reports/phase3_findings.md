@@ -13,6 +13,79 @@ anything in this document.
 
 ---
 
+## Executive summary
+
+**The funnel.** 155,000 sessions produce 105,605 orders — **68.13% checkout
+conversion**, the number a checkout team is bonused on. Only 76,166 of those
+orders are ever delivered. On the resolved population, **net conversion is
+56.87%** and the leak is **11.26pp**; treating every unresolved order as a
+failure gives the conservative bound, 49.14% and 18.99pp. The largest drop
+anywhere in the funnel is the last one — 25,225 shipped orders that never became
+a delivery, more than the address and payment steps combined, and the only step
+invisible to a checkout dashboard. Consequence: any intervention scored on
+checkout conversion can look successful while destroying value.
+
+**What RTO costs.** ₹167.79 Cr of annual exposure at a *derived* annualisation
+factor of 227.26 — 74.6% cash out the door, 25.4% foregone margin. **61.44% of
+that cost is addressable** (Phase 1 assumed 65%), leaving ₹103.09 Cr; the
+₹30.93 Cr "recoverable" line below it rests on an unevidenced 30% efficacy
+placeholder and must not be quoted to a finance partner until Phase 6 measures an
+ATE. The operating baseline: **RTO destroys ₹41.16 per session started while the
+business earns ₹19.21** — the drag is more than twice the realised margin.
+
+**Which hypotheses survived.** Of nine measurable priors, five met, one holds as
+a planted null, three missed — each with a traceable mechanism, none silently.
+H1 survives in both forms: the raw COD–prepaid RTO gap is **17.73pp** and the
+adjusted gap **10.67pp**, a 39.8% shrink inside the pre-registered 30–50% band.
+Payment method is a real lever at roughly *half* the size the raw number implies.
+The residual cannot be closed observationally — only the Phase 6 partial-payment
+experiment can identify it.
+
+**The headline negative result is H6.** Realised delivery delay explains
+**15.4× more RTO deviance than the delivery promise** does. The mechanism is the
+sharper half: the two *coefficients* differ by only 1.7×, but promise is **83%
+pinned by geography** and takes ten integer values, so it has almost no
+independent variation to act through. A lever is worth its coefficient times the
+range you can actually move it over, and promise fails on the second factor.
+**This is a logistics fix. No checkout intervention moves realised delay, and
+"shorten the promise" is excluded from the Phase 5 library on evidence.**
+
+---
+
+## 0. Prior scoreboard
+
+Every pre-registered prior in Phase 3, measured. Nine hypothesis lines plus the
+one assumption that feeds the waterfall directly.
+
+| | Prior | Measured | Verdict | Where |
+|---|---|---:|---|---|
+| **H1 raw** — COD–prepaid RTO gap | ≥ 15pp | **17.73pp** | **MET** | §C.1 |
+| **H1 adjusted** — shrinks 30–50%, survives | 30–50% shrink | **39.8%** (17.73 → 10.67pp), survives | **MET** | §C.7 |
+| **H2** — new customers adopt COD more | +12–18pp | **+22.46pp** | **ABOVE** | §D.1 |
+| **H3** — prior RTO predicts future RTO | 2.0–2.5× | **1.693×** (2.39× at 3+ priors) | **BELOW** | §D.2 |
+| **H4** — order value → COD is an inverted U | non-monotonic | **inverted U, peak ₹1,678** | **MET** | §D.3 |
+| **H5a** — ratings raise COD | small, significant | **+4.50pp per lost star** | **MET** | §D.4 |
+| **H5b** — `review_count` on RTO is a planted null | ≈ 0 | **−0.022; −1.0pp across p10–p90** | **NULL HOLDS** | §D.4 |
+| **H6** — realised delay dominates promise | delay > promise (50% conf.) | **15.4× the deviance** | **MET** | §D.5 |
+| **H11** — payment failure causes COD | 8–15% | **5.90%** | **BELOW** | §D.6, §A.4 |
+| **Addressable share of RTO cost** (Phase 1 §7.2 `[A]`) | 65% | **61.44%** | **BELOW** | §B.4 |
+
+**Four misses, four mechanisms, zero unexplained.**
+
+| Miss | Mechanism | Recorded |
+|---|---|---|
+| H2 above | The tenure gradient is steeper than Phase 1's band at the new-customer end; BR-01 overshoots for the same reason | A43 |
+| H3 below | `noise_sd` raised 0.85 → 3.3125 to bring the AUC ceiling into GT-05's band. That noise dilutes every pre-checkout signal, including `pit_rto_rate_shrunk` (+2.80 by design). A direct, traceable cost of a Phase 2 ruling | A37 |
+| H11 below | Payment-failure parameters were set from external gateway ranges; the 8–15% prior was an independent guess. The two were never reconciled | A35 |
+| Addressable below | Assumed without a reason taxonomy to measure against. Quoting 65% would have overstated the pool by ₹5.97 Cr | §B.4 |
+
+**None of the four misses overturns the conclusion it supported.** H3's
+threshold reading survives at 3+ prior RTOs; H11's reliability fix is smaller but
+still the only zero-risk intervention; the addressable share clears Phase 1
+§7.4's "unavoidable > 50%" failure threshold at 38.56% structural.
+
+---
+
 ## A. The funnel
 
 ### A.1 The opening argument
@@ -663,6 +736,9 @@ the reading.
 
 ### D.0 Scorecard
 
+Section-scoped. The consolidated version — H1 and the addressable-share
+assumption included, with a mechanism for every miss — is **§0**.
+
 | | Hypothesis | Prior | Measured | Verdict |
 |---|---|---|---:|---|
 | **H2** | New customers adopt COD more | +12–18pp | **+22.46pp** | **ABOVE** |
@@ -676,6 +752,11 @@ the reading.
 Three priors miss, and all three have identifiable mechanisms. H6 was
 untestable until decision **A46** repaired a projection defect that published
 realised delay conditional on the outcome; it is now settled, and decisively.
+
+**H6 is a headline finding, not a row in this table.** It is the only hypothesis
+here that removes an intervention from the Phase 5 roadmap, and the *mechanism*
+is the transferable half — see §D.5 and the exclusion recorded in
+`docs/phase3_closeout.md`.
 
 ---
 
@@ -916,6 +997,17 @@ ten integer values — whereas realised delay varies freely, order by order.
 **A lever is worth its coefficient times the range you can actually move it
 over.** Promise fails on the second factor.
 
+**The distinction is worth stating in general terms, because product analysis
+conflates the two constantly.** A coefficient answers *how much does the outcome
+move per unit of this thing*. A deviance contribution answers *how much of the
+outcome can this thing actually account for, given how much it varies in the
+world you operate in*. A coefficient ratio of 1.7× and a deviance ratio of 15.4×
+are not in conflict and neither is the "real" number — they answer different
+questions, and only the second one tells you whether to build the feature. A
+variable can carry a large, correct, significant coefficient and still be
+worthless as a lever because it is pinned by something you do not control. That
+is precisely the promise's situation: 83% determined by the destination.
+
 #### The product conclusion, stated plainly
 
 **This is a logistics fix, not a checkout fix. No intervention in the Phase 1
@@ -1107,6 +1199,9 @@ Q1–Q13 of the Phase 1 §15 "SQL library (13 queries)" are written. The bluepri
 names the count but never enumerates the thirteen, so the split across files is a
 Phase 3 decision, recorded here rather than inferred. Section D adds no new
 queries — H2–H6 reuse Q11–Q13's cell machinery with different cuts.
+
+**Handover:** `docs/phase3_closeout.md` records what Phase 4 inherits, what it
+must not assume, and the one intervention Phase 5 inherits as an **exclusion**.
 
 **Open item for a ruling:** GT-03's magnitude floor (§C.3). The ordering condition
 passes; the 0.35 floor fails at 0.088 because customer behavioural history is a
