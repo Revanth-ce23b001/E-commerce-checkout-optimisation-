@@ -81,11 +81,18 @@ recover.
 **If fitted M1 comes in below 0.72, Phase 1's own pre-commitment applies: coarse
 tiers only, reported honestly. Do not tune anything to clear the gate.**
 
-### 3.2 `attempt_delay_days` and `delivery_delay_days` are BOTH Stage-4
+### 3.2 THE STAGE-4 BAR — the single most likely leakage vector in Phase 4
 
-**Neither may enter M1 or M2.** This needs saying explicitly *because* H6 makes
-delay look like the most attractive feature in the warehouse — it is the single
-largest explanatory factor for RTO in the dataset, at 15.4× the promise.
+`attempt_delay_days` and `delivery_delay_days` are **both Stage-4**.
+**Neither may enter M1 or M2.**
+
+Of every way Phase 4 could leak, this is the most probable, because it is the
+only one that a *correct* Phase 3 finding actively argues for.
+
+H6 makes delay look like the most attractive feature in the warehouse — it is the
+single largest explanatory factor for RTO in the dataset, at **15.4×** the
+promise. **That is the reason this bar will be tempting, not a reason it is
+permitted.**
 
 It is also determined **after dispatch**. A model containing it does not predict
 RTO; it observes one. That is Phase 1 §9.2's `actual_delivery_days` exclusion in a
