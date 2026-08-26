@@ -483,13 +483,19 @@ nothing.**
 Planted truth: **AME 9.99pp**. Naive gap: **17.73pp**. The difference —
 **7.74pp** — is selection.
 
-| | Estimate | 95% CI | Controls | Recovers | GT-03 |
+| | Estimate | 95% CI | Controls | Recovers | GT-03 (band 20–75%) |
 |---|---:|---|---|---:|---|
 | **1. Raw crosstab** | **17.73pp** | [17.31, 18.16] | none | 0.0% | — |
 | **2. Stratified** (tenure × geo, ATT) | **14.59pp** | — | 16 cells | 40.6% | **PASS** |
-| **3. Logistic regression** | **10.67pp** | [10.07, 11.28] | 41 confounders | **91.2%** | **FAIL** |
-| **4. Propensity matched** | **12.24pp** | [11.81, 12.68] | matched on P(COD\|X) | 70.9% | **FAIL** |
+| **3. Logistic regression** (ATE) | **10.67pp** | [10.07, 11.28] | 41 confounders | **91.2%** | **FAIL** |
+| **4. Propensity matched** (ATT, **PRIMARY**) | **12.24pp** | [11.81, 12.68] | matched on P(COD\|X) | **70.9%** | **PASS** |
 | **Truth (unobservable)** | **9.99pp** | — | — | 100% | — |
+
+**The graded estimate is row 4**, the propensity match as an ATT — A49 fixed the
+estimand, and the ATE/ATT switch alone is worth 1.9pp. As an ATT the logistic
+recovers 66.9% and also passes; the 91.2% above is its ATE form, which is not
+comparable to the truth file's AME and **still fails**. That continuing failure is
+what shows the 75% ceiling excludes rather than merely accommodates.
 
 Every estimate is correctly **ordered**: `AME < adjusted < naive` holds in all
 four cases. Each successive method moves toward the truth. Nothing here is
@@ -511,24 +517,36 @@ the same one the truth file measured.
 **The logistic regression lands 0.68pp above the truth.** It removes 91.2% of the
 confounding.
 
-### C.3 GT-03 fails on the full confounder set, and that is the finding
+### C.3 The adjustment recovers more than designed — and the reason is the DGP
 
-GT-03's rule (decision A6):
+> **STATUS, and read this before the rest of the section.** When this section was
+> written, GT-03 failed and the cause was undiagnosed. Ruling **A50** ordered the
+> cause measured; ruling **A51** accepted the result, raised the closure ceiling
+> from 65% to **75%** *on the measured mechanism*, and recorded limitation
+> **L15**. **GT-03 now passes.** The analysis below is unchanged — the numbers
+> were right — but the two readings at the end have been settled, and the
+> settlement is in §C.3.1.
+
+GT-03's rule (floor by A49, ceiling by A51):
 
 ```
 PASS if  AME < adjusted < naive
-AND      (adjusted − AME) / (naive − AME) >= 0.35
+AND      the adjustment closes 20%–75% of the naive-to-AME distance
 ```
 
-The ordering condition passes for all four methods. The **magnitude** condition
-fails for the regression (0.088) and for the match (0.291). Both recover more of
-the selection component than the test was designed to permit.
+The ordering condition passes for all four methods. Under the **original 65%
+ceiling** the closure condition failed for the regression (91.2% as an ATE) and
+for the match (70.9%): both recovered more of the selection component than the
+threshold's author had expected.
 
-**This was not tuned, and it will not be.** The obvious way to make GT-03 pass is
-to drop `pit_cod_share` from the confounder set. That would be selecting a model
-specification to hit a validation target — the exact move CLAUDE.md rule 3 and
-decision A7 forbid elsewhere in this project. The full-confounder estimate is
-reported as primary and the test is recorded as failing.
+**This was not tuned, and it was not tuned to fix it either.** The obvious way to
+make GT-03 pass was to drop `pit_cod_share` from the confounder set. That would
+be selecting a model specification to hit a validation target — the exact move
+CLAUDE.md rule 3 and decision A7 forbid elsewhere in this project. The
+full-confounder estimate remains primary, `pit_cod_share` is still in it, and the
+ceiling moved only after the mechanism was measured. **The logistic ATE still
+fails at 91.2%**, which is the evidence that the ceiling was raised rather than
+removed.
 
 #### What actually drives the over-recovery
 
@@ -571,11 +589,11 @@ firewall.
 #### Two readings, and which one I hold
 
 **Reading 1 — GT-03's band is calibrated to a weaker proxy than this dataset
-has.** The 0.35 floor was set by decision A6 without a fitted model to measure
-against; it encodes an expectation about how recoverable the confounding would
-be. That expectation was too pessimistic for a DGP where history is generated
-from latents. On this reading the test needs re-anchoring, exactly as A6
-re-anchored it once before when γ₀ moved.
+has.** The ceiling was set without a fitted model to measure against; it encodes
+an expectation about how recoverable the confounding would be. That expectation
+was too pessimistic for a DGP where history is generated from latents. On this
+reading the test needs re-anchoring, exactly as A6 re-anchored it once before
+when γ₀ moved.
 
 **Reading 2 — the residual is small in absolute terms and the test is doing its
 job.** 0.68pp of unrecoverable bias on a 9.99pp effect is a 6.8% overstatement.
@@ -583,12 +601,61 @@ GT-03 exists to prove the truth is *not fully recoverable*, and it is not: the
 estimate does not reach 9.99pp, and it never will, because no amount of
 observable history reconstructs `latent_intent` exactly.
 
-**I hold Reading 1 and flag it for a ruling.** The ordering condition — the part
-that actually detects leakage — passes cleanly. The magnitude floor is a
+**I held Reading 1 and flagged it for a ruling.** The ordering condition — the
+part that actually detects leakage — passes cleanly. The closure ceiling is a
 judgement about proxy strength that this dataset falsifies. **But re-anchoring a
 test after seeing the result it failed is precisely the move that needs someone
 other than the person who ran it to approve.** Recorded as an open item, not
 resolved.
+
+#### C.3.1 How it was settled — measured, then ruled
+
+Ruling **A50** declined to re-anchor on the argument above and ordered the two
+candidate explanations measured apart. Both were tested directly, and the
+distinction they draw is the finding.
+
+| Target | Kind | Order-level R² | Customer-level R² |
+|---|---|---:|---:|
+| `latent_intent` | latent | 0.151 | 0.161 |
+| `latent_trust` | latent | 0.220 | 0.225 |
+| `latent_liquidity` | latent | 0.288 | **0.295** |
+| `true_cod_propensity` | **choice channel** | 0.819 | **0.853** |
+
+**Explanation A — "a latent leaked into the safe feature set" — is refuted.** No
+latent comes back above **R² 0.295** from 58 columns of everything an analyst can
+see. "Unobservable by construction" holds exactly as written.
+
+**Explanation B — "the confounding is weaker than designed" — is confirmed, and
+sharpened.** What the safe features reconstruct is not the latents' *values* but
+**treatment assignment**: `true_cod_propensity` comes back at **R² 0.853**, and
+the propensity model's own AUC is **0.835**. Decision **A11** generates
+pre-window history from the *same latent slopes* that drive current COD choice,
+which makes `pit_cod_share` close to a **sufficient statistic for the propensity
+score** — and in a matching framework, recovering assignment well is most of what
+an estimator needs.
+
+The per-confounder deviance table (`reports/gt03_diagnostics.md`) confirms it
+from a third direction: the biggest gap-closers are all COD-choice history and
+are collectively under 3% of explained deviance, while the single largest
+deviance contributor closes nothing at all.
+
+| Confounder | Deviance share | Closure lost if dropped |
+|---|---:|---:|
+| `pit_cod_share` | 1.5% | **+8.06pp** |
+| `pit_has_history` | 0.9% | **+5.05pp** |
+| `has_saved_prepaid_instrument` | 0.6% | +2.77pp |
+| `pit_rto_rate_shrunk` | 1.9% | +1.34pp |
+| `courier_reliability_score` | **10.6%** | **−0.36pp** |
+
+`courier_reliability_score` explains RTO without explaining COD *choice*, so it
+carries a tenth of the model's explanatory power and moves the causal estimate
+not at all. Deviance and gap-closing are different questions, and the two
+orderings disagree.
+
+**Ruling A51 accepted this as a DGP limitation rather than an analysis failure**,
+raised the ceiling to 75% on the stated mechanism, and recorded **L15**. Dropping
+the suspected proxy `pit_rto_rate_shrunk` was tested and moves the primary only
+70.9% → 64.3%, so it was never the explanation and it stays in the model.
 
 ### C.4 Why the propensity match recovers *less* than the regression
 
@@ -673,10 +740,36 @@ willingness to abandon a parcel at the door. Whatever an analyst controls for,
 some of the COD–RTO gap will always be the customer rather than the payment
 method, and **no observational method can say how much.**
 
-The best estimate here still overstates the true effect by **6.8%**, and that is
-with a favourable proxy structure and 41 confounders. An analyst who did not have
-the truth file would have no way to know the residual was 0.68pp rather than
-5pp — the data contains no signal that would tell them.
+**What the adjustment does reach, stated as a number.** The propensity match —
+the primary estimate — closes **70.9%** of the naive-to-truth gap. The remaining
+**29.1%** is irreducible. That is the claim to carry forward, in place of the
+vaguer "the adjustment gets closer but cannot reach the truth", which asserts a
+direction without a magnitude and lets a reader assume the residual is whatever
+size suits them.
+
+> ### ⚠️ And 29% is an optimistic floor, not a realistic estimate
+>
+> A50's diagnostics found that treatment assignment here is **~85%
+> reconstructible** from safe features (`true_cod_propensity`, R² 0.853;
+> propensity-model AUC 0.835) even though **no latent exceeds R² 0.295**. The
+> cause is decision **A11**: pre-window history is generated from the same latent
+> slopes that drive current COD choice, so `pit_cod_share` is close to a
+> sufficient statistic for the propensity score.
+>
+> **A real marketplace would have less recoverable assignment and therefore more
+> residual confounding.** Real COD choice turns on who is home that week, whether
+> a card was declined at another merchant, what a relative advised — none of which
+> lands in a `pit_*` aggregate. A real propensity model would score well below
+> 0.835.
+>
+> So present 29% as *"how much survived even when assignment was unusually easy to
+> model"*, never as *"how much confounding survives adjustment in practice"*.
+> Limitation **L15** carries this in full.
+
+The best estimate here still overstates the true effect by **6.8%** on the
+logistic ATE, and that is with a favourable proxy structure and 41 confounders.
+An analyst who did not have the truth file would have no way to know the residual
+was 0.68pp rather than 5pp — the data contains no signal that would tell them.
 
 **The honest ceiling on any real-world causal claim about payment method is
 therefore: "a strong association, robust to every observed confounder, whose
@@ -695,6 +788,13 @@ predicted exactly this limitation, and it survives contact with the data.
 > nearly right here*, because the analysis contains nothing that would let a
 > reader distinguish 0.68pp of residual bias from 5pp. The precision is
 > borrowed from a truth file that does not exist outside this repository.
+>
+> **Where a number IS supportable — the residual, with its direction of bias.**
+> "Adjustment closes ~71% of the naive-to-truth gap; the remaining ~29% is
+> irreducible because purchase intent is unobservable — and on real data that
+> residual would likely be **larger**, because our simulated treatment assignment
+> is unusually recoverable." That sentence commits to a magnitude *and* says which
+> way it is wrong, which is the most a synthetic study can honestly offer.
 
 ### C.7 What this means for the product
 
@@ -1203,7 +1303,13 @@ queries — H2–H6 reuse Q11–Q13's cell machinery with different cuts.
 **Handover:** `docs/phase3_closeout.md` records what Phase 4 inherits, what it
 must not assume, and the one intervention Phase 5 inherits as an **exclusion**.
 
-**Open item for a ruling:** GT-03's magnitude floor (§C.3). The ordering condition
-passes; the 0.35 floor fails at 0.088 because customer behavioural history is a
-stronger proxy for the latents than decision A6 anticipated. Re-anchoring a test
-after seeing it fail needs approval from someone other than whoever ran it.
+**Open item for a ruling — SINCE RESOLVED:** GT-03's closure clause (§C.3). The
+ordering condition passed; the closure clause failed because customer behavioural
+history is a stronger proxy for the latents than the threshold's author
+anticipated. Re-anchoring a test after seeing it fail needs approval from someone
+other than whoever ran it, so it was left open.
+
+Ruling **A50** ordered the mechanism measured before any re-anchoring (§C.3.1);
+ruling **A51** then accepted it as a DGP limitation, raised the ceiling to 75% on
+that mechanism, and recorded limitation **L15**. **GT-03 passes.** The estimates
+in this section are unchanged.

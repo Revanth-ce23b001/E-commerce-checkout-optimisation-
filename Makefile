@@ -6,7 +6,7 @@ ifeq ($(OS),)
 PY := .venv/bin/python
 endif
 
-.PHONY: help setup test dev generate dryrun validate load verify baseline all clean
+.PHONY: help setup test dev generate dryrun validate load verify baseline m1 m2 gt03 all clean
 
 # Every target below is a thin wrapper. README documents the direct `python
 # scripts/...` invocation for each, so nothing is blocked on having make installed.
@@ -20,6 +20,9 @@ help:
 	@echo "make load      - load PostgreSQL + REVOKE (DROPS both schemas)"
 	@echo "make verify    - LK-01, LK-05, DQ-01, FK and CHECK against the server"
 	@echo "make validate  - run the validation suite     -> reports/"
+	@echo "make m1        - Phase 4: rules baseline + M1  -> reports/phase4_m1.md"
+	@echo "make m2        - Phase 4: M2 + challenger + A47 -> reports/phase4_m2.md"
+	@echo "make gt03      - GT-03 diagnostics (A50)      -> reports/gt03_diagnostics.md"
 	@echo "make all       - generate -> load -> verify -> validate"
 
 setup:
@@ -63,6 +66,23 @@ baseline:
 
 validate:
 	$(PY) scripts/03_validate.py
+
+# Phase 4. Needs `load` to have run: it reads analytics.vw_risk_model_input
+# through the restricted `analyst` role, which is the only permitted source.
+m1:
+	$(PY) scripts/06_fit_m1.py
+
+# Phase 4 Stage 2. Also publishes reports/fairness_checks.json, which FA-01
+# reads -- so `make validate` after `make m2` is what turns FA-01 from SKIP
+# into a real result.
+m2:
+	$(PY) scripts/07_fit_m2.py
+
+# GT-03 diagnostics (A50). Measures WHY the adjustment closes 70.9% of a 65%
+# ceiling; changes nothing. Reads data/processed/h1_population.parquet, so
+# the Phase 3 analysis must have run. Writes reports/gt03_diagnostics.md.
+gt03:
+	$(PY) scripts/08_gt03_diagnostics.py
 
 all: generate load verify validate
 

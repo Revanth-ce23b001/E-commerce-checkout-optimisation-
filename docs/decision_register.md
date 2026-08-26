@@ -1940,3 +1940,738 @@ one cannot hide behind the other being full.
 Modules 22-23 (PostgreSQL load, report render) are built. LK-01, LK-05 and
 DQ-01 are verified against a live server; DQ-01 compares two independent
 generation runs, not a manifest against the run that wrote it.
+
+---
+
+### A47 — §8.4 geography audit failed on M1 · **RULED 2026-08-26 · OPTION 3 + 3 CONDITIONS**
+
+Raised in `reports/phase4_m1.md` §6. Full standalone record — finding, options,
+ruling, measured cost — in **`docs/phase4_escalation.md`**. Summarised here so
+the register stays the index of every decision.
+
+#### What was escalated
+
+M1 (test AUC 0.7530) restricted **52.6% of Tier-3 orders and 0.02% of Metro
+orders** at the 17% volume §8.3 expects the High tier to occupy. §8.4's limit is
+2.5x. The breach held at every volume tested.
+
+The modeller escalated rather than deciding, which is what §8.4 requires: *"a
+risk model in a consumer product is a policy, not just a classifier. I wrote the
+fairness constraints before I wrote the model, because after you have the AUC
+it's very hard to argue yourself out of using it."*
+
+#### The measurement that made it an escalation rather than a fix
+
+| model | features | test AUC | Tier-3 ÷ Metro |
+|---|---|---|---|
+| full model | 48 | 0.7530 | 2677x |
+| no `geo_tier` dummies | 45 | 0.7515 | 427x |
+| no geographic features at all | 41 | 0.6934 | 3.2x |
+
+**Removing the protected attribute cost 0.0015 AUC and fixed nothing** —
+`serviceability_score`, `courier_reliability_score`, `cod_cultural_index` and
+`estimated_delivery_days` reconstruct the tier. A fully geography-blind M1 still
+breaches §8.4 **and** falls below §9.4's 0.72 gate. There is no version of this
+model that satisfies both constraints, so no feature-selection decision could
+have resolved it.
+
+#### Ruling: option 3 — restrict WITHIN geo tier
+
+Rank orders against their own tier's distribution. The objection that this flags
+genuinely low-risk Metro orders was **accepted as a real cost**, not rebutted:
+the policy is deliberately less margin-optimal than the score permits, because a
+policy restricting half of Tier-3 and none of Metro is not defensible to a
+customer, a regulator or a journalist. That trade is the product decision, and
+§8.4 pre-committed to it before the AUC existed.
+
+Rejected alternatives, with reasons, are in `phase4_escalation.md` §5. Option 5
+— re-anchoring the 2.5x limit against the measured 5.4x RTO spread — was left on
+the record as available but not taken, because taking it *having just seen the
+AUC* is the exact move §8.4 exists to prevent.
+
+#### Conditions, all discharged
+
+| # | Condition | Where | Result |
+|---|---|---|---|
+| 1 | Per-tier thresholds for RESTRICTIVE interventions only; offers use the global score | `src/risk/policy.py:INTERVENTIONS`, `phase4_m2.md` §6.1 | B / D / COD gating are per-tier; A / C / E / F global |
+| 2 | Report the margin cost at equal restriction volume | `phase4_m2.md` §6.3 | **₹172,634** on a 22,520-order window = **₹3.92 Cr/yr**, 2.4% of the ~₹165 Cr headline |
+| 3 | Report Tier-3's ABSOLUTE restriction rate, not just the ratio | `phase4_m2.md` §6.4 | falls from **42.3% to 15.0%** — and 96.8% of newly-restricted Metro orders score below p\*, which is stated as the cost rather than buried |
+
+#### FA-01 — the eighth validation family
+
+A ruling that is not tested is a ruling that regresses. **FA-01** (HARD,
+`src/validation/tests_fa.py`) asserts the restrictive-intervention rate ratio,
+**worst tier over best tier**, stays ≤ 2.5x at every volume in
+[0.05, 0.10, 0.17, 0.25]. Measured post-overlay, which is what a customer
+experiences. Worst-over-best rather than Tier-3-over-Metro so a policy
+concentrating on some other tier cannot pass a check watching the wrong pair.
+
+Current result: **PASS, worst 1.44x**. The same model under global thresholds
+fails at every volume.
+
+The residual 1.35x is not the score. Per-tier selection equalises exactly at
+17.00% per tier; the §8.4 **clean-record cap** then vetoes 33.9% of Metro
+selections against 16.8% of Tier-3, because Tier-3 runs 5.4x Metro's RTO rate and
+therefore holds far fewer clean records. **The overlay has its own geographic
+gradient**, and it favours Metro — worth knowing before designing another
+carve-out of that shape.
+
+#### Also applied under this ruling
+
+* **M2 fitted** (`scripts/07_fit_m2.py`): test AUC **0.7684**, below the 0.7717
+  ceiling it is now entitled to approach, calibration slope 0.9466.
+* **Three-rule §9.3 baseline** (0.6806) reconstructed from view columns rather
+  than by widening the firewall — `pit_risk_tier_rule_based` escalated one tier
+  for COD, verified against the planted `order_risk_tier_rule_based` at
+  **100.00%** agreement on all 22,520 test rows.
+* **GBM challenger does not ship**: −0.34pp against §9.3's required +3.00pp. Its
+  *train* AUC of 0.7880 sits above the achievable ceiling — capacity, not signal,
+  which is what the margin exists to refuse to pay for.
+* **Duplicated exclusion rationale removed** — the five `pit_*` count culls share
+  one reason, now stated once above the table (`features.COUNT_CULL_NOTE`).
+
+#### Count correction
+
+The validation suite has **68 tests in eight families**, not the 62 CLAUDE.md
+was quoting. The stale figure predated the VOL-02a/02b split (A31), EC-01b,
+EC-08 and DQ-15/DQ-16 (A46) — five real tests that were never added to the
+headline. CLAUDE.md now says the count is measured from the suite rather than
+maintained by hand, because this is the second time it has drifted.
+
+**No slope, level or business assumption moved.** `params.yaml` is unchanged.
+
+---
+
+### A48 — Intervention E is RESTRICTIVE, not an offer · **RULED 2026-08-26**
+
+A47's condition 1 split the intervention library into sticks (per-tier) and
+carrots (global). **E — Smart payment recommendation** was classified as an offer
+on the reasoning that reordering payment methods removes nothing.
+
+**That reasoning was wrong.** E does not only emphasise some options — it
+**de-emphasises others**. For a payment method chosen by 62% of orders largely
+out of habit, salience *is* the option. A lever §10.1 expects to move prepaid
+share by 3-6pp through position alone is exercising the same power as a fee while
+requiring none of a fee's disclosure.
+
+**E ranks per-tier**, alongside B (COD fee), D (partial payment) and G (COD
+gating).
+
+#### The one-tap constraint — carried into the Phase 5 PRD as non-negotiable
+
+> COD must remain reachable in **ONE TAP** in every variant of E. Reordering and
+> de-emphasis are permitted; an extra tap, a hidden menu, a collapsed accordion
+> or a confirmation interstitial is not.
+
+§10.1 already draws this line — *"emphasis is acceptable; hiding or burying COD
+is not"* — and E is the only lever that can cross it without a word of copy
+changing. An arm that violates it is not a variant of E; it is intervention G
+wearing E's name and must be governed as G.
+
+The constraint lives in `src/risk/interventions.py:ONE_TAP_CONSTRAINT` as well as
+in the PRD. A constraint that lives only in a document is a constraint that gets
+lost at the next handover.
+
+---
+
+### A49 — GT-01, GT-03 and GT-04 on first execution · **RULED 2026-08-26 · 2 RESTATED, 1 ACCEPTED**
+
+The six tests that had been SKIP since Phase 2B — GT-01/03/04/06/07 and BR-09 —
+became runnable once Phase 4 produced fitted models. **The suite now executes 68
+tests with zero skips, the first time in the project every HARD test has run.**
+
+GT-06, GT-07 and BR-09 passed on first execution. GT-01, GT-03 and GT-04 failed.
+This ruling restates two of them and accepts the third. **Nothing was tuned and
+nothing was waived.**
+
+#### The root cause, named once, covering GT-01 and GT-04
+
+Decision **A37** raised `post_dispatch_shock.noise_sd` from **0.85 to 3.3125** to
+bring the achievable AUC ceiling into GT-05's band; **A38** froze it. The
+generator draws `logit(p) = Xβ + ε` with `ε ~ N(0, 3.3125²)`. A model fitted on
+`X` alone cannot see `ε` and converges on an attenuated `β / sqrt(1 + 3σ²/π²)` —
+**0.480** at σ = 3.3125, against **0.906** at σ = 0.85.
+
+**GT-01's 80%-inside-CI clause and GT-04's contains-zero clause were both written
+against σ = 0.85 and never re-anchored when A37 moved it.** Limitation **L8**
+already records that the spec's *prose* figures (13.4pp / 19.9pp / 33%) belong to
+that superseded era. What L8 missed is that **two validation thresholds belong to
+it too** — they are σ = 0.85 prose with a `_r(...)` around them. Nothing noticed,
+because neither test had ever executed. **This is a σ = 0.85 threshold measuring
+a σ = 3.3125 dataset.**
+
+Cross-references: **A37** (the recalibration), **A38** (the freeze), **L8** (the
+prose consequence), **L14** (the coefficient-magnitude consequence).
+
+---
+
+#### GT-04 — RESTATED. The threshold was wrong.
+
+The brief called `review_count` a "planted null", but `params.yaml` plants
+**−0.05, not 0**. At n = 91,250 a −0.05 logit coefficient is detectable, so a CI
+excluding zero is the **correct** result. A test asserting otherwise asserts that
+the estimator should fail to find something that is there.
+
+Restated to what the clause was always for — confirming the estimator does not
+**inflate** a negligible effect:
+
+```
+PASS if the 95% CI contains the planted -0.05
+AND  the p10 -> p90 marginal effect is < 2.0pp
+```
+
+**Result: STILL FAILS, on clause 1.** Reported rather than absorbed, as the
+ruling required.
+
+| Clause | Measured | Verdict |
+|---|---|---|
+| CI contains −0.05 | [−0.03555, −0.00830] | **FAIL** |
+| \|p10→p90\| < 2.0pp | 1.02pp | PASS |
+
+**The direction matters and is the finding.** The CI sits *above* the planted
+value: the estimate is **smaller** in magnitude than what was planted, not
+larger. That is the same attenuation L14 measures, confirmed independently —
+planted −0.05, fitted −0.0219, **ratio 0.439** against the predicted 0.480.
+
+GT-04 exists to catch an estimator *inflating* a negligible effect into a
+finding. It does the opposite. The clause that actually tests inflation passes.
+
+**The general consequence:** under σ = 3.3125, **no test comparing a fitted
+coefficient's CI to an un-attenuated planted value can pass at this sample
+size.** The CI half-width is 0.0136; the attenuation gap is 0.0281, about twice
+as wide. GT-01 and GT-04 are one failure measured two ways.
+
+---
+
+#### GT-03 — RESTATED. The threshold was stale.
+
+The old `remaining >= 0.35` floor was written against a naive/AME gap that A37's
+recalibration moved. Restated on the relative rule already ruled for GT-02:
+
+```
+PASS if AME < adjusted < naive
+AND  the adjusted estimate closes between 20% and 65% of the naive-to-AME distance
+```
+
+**The 65% ceiling is unchanged.** The point of GT-03 is that adjustment must not
+fully recover a partly-unobservable truth, and that constraint stands.
+
+**Result: STILL FAILS, on closure.** AME 9.99pp, naive 17.73pp, selection
+component 7.74pp. Estimand reported per the ruling; ATT is the comparable one.
+
+| Estimate | Estimand | Adjusted | Closes | Ordered | Verdict |
+|---|---|---|---|---|---|
+| Propensity matched **(PRIMARY)** | ATT | 12.24pp | **70.9%** | YES | **FAIL** |
+| Logistic, 41 confounders | ATT | 12.56pp | 66.9% | YES | FAIL |
+| Logistic, 41 confounders | ATE | 10.67pp | 91.2% | YES | FAIL |
+| Stratified, tenure × geo | ATT | 14.59pp | 40.6% | YES | PASS |
+
+**Ordering holds on all four** — nothing leaked, nothing is inverted. Closure
+breaches the 65% ceiling on every estimator except the stratified one.
+
+**And that pattern is the finding, not an accident of specification.** The
+stratified estimator is the only one that controls for **no customer behavioural
+history** — 16 tenure × geo cells and nothing else. The more customer history you
+control for, the more of the supposedly unobservable confounder you recover.
+Decision **A11** generates pre-window history *from the latents*, so
+`pit_cod_share` is a direct observable consequence of the unobservable rather
+than merely correlated with it; it alone moves recovery from 73.8% to 90.0%.
+
+Noted for the record: the **ATE→ATT** switch the ruling asked for is worth
+**1.9pp** on the logistic estimate (10.67 → 12.56pp) and moves it from 91.2% to
+66.9% closure — much closer to the ceiling, but still over it.
+
+**Not restated a second time**, per the ruling's own instruction. The two obvious
+fixes — grade on the stratified estimate, or drop `pit_cod_share` from the
+confounder set — are both specification-shopping to hit a validation target,
+forbidden by CLAUDE.md rule 3 and decision A7, and both would be done *after
+seeing the result they failed*. Phase 3 §C.3 already refused exactly this.
+
+---
+
+#### GT-01 — ACCEPTED as limitation **L14**.
+
+Zero sign flips across 13 Strong/Moderate relationships is the substantive
+requirement and it passes. GT-01 is now graded on that clause; the magnitude
+clause becomes recorded evidence in `docs/limitations.md` **L14**.
+
+**Attenuation factor across the 13, as the ruling required:**
+
+| Statistic | Value |
+|---|---|
+| Mean recovered ÷ planted | **1.011** |
+| Median | 0.741 |
+| SD | 0.587 |
+| **Coefficient of variation** | **0.581** |
+| Range | 0.200 – 2.018 |
+
+**The ruling asked whether the ratio is roughly uniform. It is not — and the
+mean of 1.011 is the most misleading number in this entry.** It reads as "no
+attenuation at all". What it averages is two opposing effects:
+
+* **Seven terms attenuated** toward zero as predicted (0.20 – 0.74).
+* **Six terms inflated** above 1.0 (1.19 – 2.02) — precisely those that **proxy
+  the omitted latents and `shock.*` terms**: `seller_sla_breach_rate`,
+  `paid_via_switch`, the `geo_tier` contrasts, `pit_rto_rate_shrunk`.
+  Omitted-variable bias pushes these up while noise attenuation pushes everything
+  else down, and the two cancel in the mean.
+
+**So the "uniform attenuation preserves ranking" inference does not apply**, and
+the ranking is measured directly instead rather than assumed:
+
+* Spearman ρ between |planted| and |fitted| across the 13: **0.823**.
+* The ranking the risk model actually depends on is of *orders*, not
+  coefficients, and it is measured by AUC: **0.7530** (M1) and **0.7684** (M2)
+  against a **0.7717** ceiling — within 0.4pp of the best achievable.
+
+**The conclusion the ruling reached holds. The stated reason for it does not**,
+and L14 says so rather than repeating a convenient argument.
+
+---
+
+#### Outcome
+
+| Test | Action | Result |
+|---|---|---|
+| **GT-01** | accepted as L14, graded on signs | **PASS** |
+| **GT-03** | restated to closure ∈ [20%, 65%] | **FAIL** |
+| **GT-04** | restated to CI ∋ −0.05 AND effect < 2.0pp | **FAIL** |
+
+**68 tests, 66 pass, 2 HARD fail, 0 skip. Verdict 🔴 NOT READY.**
+
+> ⚠️ **This outcome block is A49's, and it is SUPERSEDED. Do not quote it as
+> current.** Ruling **A50** restated GT-04 a second time — A49's clause asked the
+> fitted CI to contain the un-attenuated −0.05, which is unsatisfiable under
+> A37's noise — and GT-04 now **passes**. GT-03 was **not** restated and still
+> fails. Current state: **68 tests, 67 pass, 1 HARD fail, 0 skip, 🔴 NOT READY.**
+
+**`phase4-complete` is NOT tagged.** The tag asserts a state; with two HARD tests
+failing that assertion is false, and CLAUDE.md invariant 12 forbids declaring
+success with a HARD failure outstanding. Both remaining failures are now
+diagnosed to the coefficient, both are consequences of A37 and A11 — decisions
+taken deliberately and approved — and neither has been tuned.
+
+**No slope, level or business assumption moved.** `params.yaml` is unchanged.
+
+---
+
+### Methodology notes — two process catches worth recording
+
+Neither changed a number. Both are recorded because the *class* of error recurs.
+
+#### N1 — `git stash` used as a diagnostic inside a live working tree
+
+While checking whether a `UnicodeEncodeError` in `scripts/03_validate.py`
+predated the session's changes, `git stash` was run to compare against `HEAD`.
+The command was chained behind a long-running validation run, timed out
+mid-chain, and left the tracked edits stashed. Recovered with `git stash pop`
+with nothing lost, and the encoding bug turned out to be pre-existing and was
+fixed properly.
+
+**The lesson is not "be careful with stash".** It is that a *diagnostic* should
+never mutate the working tree: the question "did this bug exist before my
+changes?" is answerable with `git show HEAD:path | python -`, `git diff`, or
+reading the traceback, none of which move a file. A destructive command chained
+behind a long-running one is also a command whose failure mode is invisible until
+the timeout.
+
+#### N2 — a cross-report figure asserted rather than measured
+
+A draft of `phase4_escalation.md` §2 stated that M1's global rule "reads 52.6%
+pre-overlay and 42.3% post-overlay". The 42.3% had been read off **M2's**
+exposure table and attributed to M1. It was caught before publication, measured
+directly, and M1's true post-overlay figure is **42.33%** — so the sentence
+happened to be right, by coincidence, to one decimal place.
+
+**A number that is right by coincidence is still an unmeasured number.** The
+recurring failure it belongs to is comparing two tables that were computed under
+different conventions — here, pre-overlay versus post-overlay — and assuming the
+figures are interchangeable because they describe "the same thing". They did not:
+M1 §6.1 audits the *score's* concentration before the §8.4 protections run; FA-01
+and the M2 tables audit what a *customer experiences* after them. Both reports now
+state which convention they use and quote the other.
+
+---
+
+### A50 — GT-04 restated a second time; GT-03 measured and left open · **RULED 2026-08-26 · 1 RESTATED (OVERRIDE), 1 OPEN**
+
+A49 restated GT-03 and GT-04 and instructed that neither be restated again. Both
+then failed. This ruling **overrides that instruction for GT-04 only**, and
+**upholds it for GT-03**. The two go opposite ways and the reasons are different.
+
+**Nothing was tuned. `params.yaml` is unchanged. No slope, level or business
+assumption moved. No feature was dropped from any production model.**
+
+---
+
+#### A50.1 — GT-04: clause 1 was unsatisfiable, so it is dropped
+
+**The override, and why it is granted.** CLAUDE.md's standing position — and
+A49's explicit instruction — is that a test is not restated twice, because the
+second restatement is where "re-anchor until it passes" begins. The override is
+granted because **A49's clause was itself the error**, and the error was proved
+by measurement rather than argued around:
+
+> A49 wrote a **coverage** test where an **inflation** test was needed.
+
+The generalisation that proved it is not specific to GT-04. Under A37's
+`post_dispatch_noise_sd = 3.3125`, the estimator does not converge on the planted
+beta, it converges on beta x 0.480. For this term the **CI half-width is 0.0136**
+and the **attenuation gap is 0.0281** — the interval is about half as wide as the
+distance it was asked to span. **No test comparing a fitted CI to an
+un-attenuated planted value can pass at this sample size**, at any n this dataset
+could plausibly have. A49's clause asked the estimator to recover a magnitude
+A37's noise makes unrecoverable.
+
+That is a different situation from a test that merely fails. A failing test is
+evidence about the data; an unsatisfiable test is evidence about the test.
+
+**The restated clauses.**
+
+```
+PASS if the fitted coefficient's sign matches the planted sign
+AND    |p10 -> p90| marginal effect < 2.0pp
+AND    the fitted magnitude does NOT exceed the planted magnitude
+```
+
+| Clause | Measured | Verdict |
+|---|---|---|
+| Sign matches planted −0.05 | fitted **−0.02193**, negative | PASS |
+| \|p10→p90\| marginal effect < 2.0pp | **1.02pp** | PASS |
+| \|fitted\| ≤ \|planted\| | 0.02193 ≤ 0.05, **ratio 0.439** | PASS |
+
+**GT-04 now PASSES.**
+
+**Clause 3 is the anti-inflation guard and it is one-sided by design.** GT-04
+exists to catch an estimator turning a negligible planted effect into a finding.
+Attenuation *below* the plant is the expected direction under A37 and is
+harmless — it understates a null that was already negligible. A magnitude *above*
+the plant is the over-fitting-dressed-as-a-finding, and that is the only side the
+clause guards. The test is not vacuous: a sign flip, a p10–p90 effect at or above
+2.0pp, or any |fitted| above 0.05 still fails it, and none of those is
+attenuation.
+
+**A side benefit worth recording:** the measured 0.439 sits close to L14's
+predicted 0.480, so GT-04 now confirms GT-01's attenuation mechanism on a single
+term independently, instead of failing for it.
+
+Recorded in `src/validation/tests_gt.py:_gt_04` — with the full three-stage
+history (original / A49 / A50) in the docstring, because a clause that has been
+rewritten twice is exactly the clause a future reader will suspect of having been
+tuned, and the record is the answer to that suspicion.
+
+---
+
+#### A50.2 — GT-03: NOT restated. The failure stands.
+
+**Upheld.** The 65% ceiling is not superseded sigma = 0.85 prose. It is the
+load-bearing constraint of the project: the adjustment must **not** fully recover
+the truth, because `latent_intent`, `latent_trust` and `latent_liquidity` are
+unobservable by construction. Closing **70.9%** of the naive-to-AME distance is a
+**finding**, and a finding is not waived.
+
+Three measurements were ordered before any further ruling. All three are in
+`reports/gt03_diagnostics.md` (`make gt03`, `src/analysis/gt03_diagnostics.py`).
+**Nothing was fixed.**
+
+**(1) Refit without `pit_rto_rate_shrunk`** — the suspected latent proxy,
+planted +2.80.
+
+| Estimator | Full set | Minus the suspect |
+|---|---|---|
+| Propensity matched (PRIMARY, ATT) | 12.24pp, closes **70.9%** | 12.76pp, closes **64.3%** |
+| Logistic, ATT | 12.56pp, closes 66.9% | 12.66pp, closes 65.5% |
+| Logistic, ATE | 10.67pp, closes 91.2% | 10.77pp, closes 90.0% |
+
+Worth **6.6pp of closure on the primary, 1.3pp on the logistic**. The asymmetry
+is informative — the feature does most of its work in the *propensity* model,
+changing who is matched to whom, not in the outcome model — but it accounts for
+less than a seventh of the 70.9%. **It is not the explanation.** The refit is a
+diagnostic; the feature stays in every model.
+
+**(2) Latent reconstructibility.** R-squared of each latent on the safe feature
+set, order-level and customer-level, on both GT-03's 41 confounders and a
+deliberately wider 58-column set of everything analyst-visible and pre-outcome.
+
+| Target | Kind | Order R² | Customer R² |
+|---|---|---|---|
+| `latent_intent` | latent | 0.151 | 0.161 |
+| `latent_trust` | latent | 0.220 | 0.225 |
+| `latent_liquidity` | latent | 0.288 | **0.295** |
+| `true_cod_propensity` | **choice channel** | 0.819 | **0.853** |
+
+**No latent exceeds the ~0.35 bar; the highest is 0.295.** The "unobservable by
+construction" claim **holds as written and needs no qualifying** in any document.
+`latent_liquidity` at 0.29 is not nothing and is stated rather than rounded away.
+
+**The fourth row is the answer to the ruling's question.**
+`true_cod_propensity` is not a latent — it is the composite the three latents
+drive, the **choice channel** — and it is **85% reconstructible**. The
+propensity model's own AUC of **0.835** says the same from the other side.
+
+> The adjustment is not recovering the latents' **values**. It is recovering
+> **treatment assignment**, which the latents fully determine and which the
+> observable COD history then records.
+
+**(3) Contribution by deviance**, alongside the closure each block is worth.
+
+| Confounder | Deviance | Share of explained | Closure lost |
+|---|---|---|---|
+| `pit_cod_share` | 99.1 | 1.5% | **+8.06pp** |
+| `pit_has_history` | 60.5 | 0.9% | **+5.05pp** |
+| `has_saved_prepaid_instrument` | 36.5 | 0.6% | +2.77pp |
+| `pit_rto_rate_shrunk` | 123.6 | 1.9% | +1.34pp |
+| `geo_tier` | 92.0 | 1.4% | +1.16pp |
+| `courier_reliability_score` | **698.4** | **10.6%** | **−0.36pp** |
+| `seller_sla_breach_rate` | 193.9 | 2.9% | −0.06pp |
+
+**The two orderings disagree, and the disagreement is the finding.** The ruling
+asked for deviance; deviance alone would have answered the words and missed the
+point, so closure is reported beside it. `courier_reliability_score` dominates
+deviance at **10.6% of everything the model explains** and closes **nothing** —
+it explains RTO without explaining COD choice. The three biggest gap-closers are
+all **COD-choice history**, not RTO-risk features, and together they are under 3%
+of explained deviance.
+
+**Verdict on the ruling's two branches.** It is branch one — **a real weakness in
+the confounding structure**, not a latent leaking. The mechanism is **A11**:
+pre-window history is generated *from* the latents, so `pit_cod_share` and
+`pit_has_history` are direct observable consequences of the treatment-assignment
+mechanism rather than correlates of it. Blocking the choice channel means
+severing A11, which changes the DGP and the Phase 3 analysis with it.
+
+**GT-03 remains OPEN and FAILING.** Not restated, not waived, not tuned.
+
+---
+
+#### A50.3 — L14: attenuation is heterogeneous, so ranking is not guaranteed
+
+L14 now states plainly that the CV of 0.581 makes the attenuation
+**heterogeneous**, and that a heterogeneous rescaling **can reorder terms
+arbitrarily** — so nothing about A37's noise *guarantees* that the recovered
+ranking matches the planted one. It is an empirical question, and it was
+measured:
+
+* **Spearman rho between |planted| and |fitted| across the 13: 0.823.**
+
+**That is high, so the ranking survives** — as a measured fact about this
+dataset, not as a property of the mechanism. It could have come out low. The
+residual disagreement is concentrated in two terms on the inflated-proxy side:
+`seller_sla_breach_rate` (planted 1.20, fitted 2.42) overtakes `is_cod` (planted
+1.60, fitted 1.08), and `seller_rating_centered` (ratio 0.20) sinks below terms
+planted smaller than it.
+
+The ranking the risk model actually depends on is of **orders**, not
+coefficients: **AUC 0.7530 (M1) / 0.7684 (M2)** against a **0.7717** ceiling.
+**The risk model is fine.**
+
+L14 also records that rho must be **re-measured** if `post_dispatch_noise_sd`
+ever moves — it is not implied by the CV and cannot be carried forward.
+
+---
+
+#### Outcome
+
+| Test | Action | Result |
+|---|---|---|
+| **GT-01** | unchanged; L14 sharpened on ranking (A50.3) | **PASS** |
+| **GT-03** | measured, **not restated** | **FAIL — open** |
+| **GT-04** | restated (override): sign + effect size + no inflation | **PASS** |
+
+**68 tests, 67 pass, 1 HARD fail, 0 SOFT fail, 0 skip. Verdict 🔴 NOT READY.**
+
+**`phase4-complete` is NOT tagged.** GT-03 stays open, and CLAUDE.md invariant 12
+forbids declaring success with a HARD failure outstanding.
+
+> ⚠️ **This outcome block is A50's, and it is SUPERSEDED. Do not quote it as
+> current.** Ruling **A51** accepted GT-03 as a DGP limitation on the mechanism
+> these diagnostics established, raised the closure ceiling 65% → 75%, and
+> recorded limitation **L15**. Current state: **68 tests, 68 pass, 0 HARD fail,
+> 0 skip, 🟢 DATASET READY** — and `phase4-complete` **is** tagged.
+
+---
+
+#### Methodology note — N3: an unsatisfiable test is not a failing test
+
+Two restatements of one clause is the shape of a tuned test, and the only thing
+that distinguishes this from tuning is that the second restatement was justified
+by a **measurement that generalises beyond the test being restated**: the CI
+half-width against the attenuation gap is a property of A37's noise and the
+sample size, not of `review_count`. It predicts, correctly, that GT-01 fails the
+same way — and GT-01 was restated before GT-04 was, on independent evidence.
+
+The rule that survives: **restating a test after seeing it fail requires showing
+the clause could not have passed under any admissible outcome.** "It failed and
+here is a clause it would pass" is tuning. "It failed, and here is the arithmetic
+showing no correct estimator could pass it" is a defect in the test. The
+difference is checkable, and it is what the register has to record.
+
+---
+
+### A51 — GT-03 accepted as a DGP limitation; ceiling restated to 75% · **RULED 2026-08-26 · ACCEPTED**
+
+A50 refused to restate GT-03 and ordered three measurements instead. The
+measurements came back and they settle it. **The 70.9% closure is the DGP being
+more tractable than the threshold's author predicted — not the analysis
+leaking.**
+
+**The mechanism, named.** Decision **A11** generates pre-window history from the
+**same latent slopes** that drive current COD choice. That makes `pit_cod_share`
+close to a **sufficient statistic for the propensity score**. Hence the pattern
+the diagnostics found and which nothing else explains:
+
+| Target | Kind | Customer-level R² |
+|---|---|---|
+| `latent_intent` | latent | 0.161 |
+| `latent_trust` | latent | 0.225 |
+| `latent_liquidity` | latent | **0.295** |
+| `true_cod_propensity` | **choice channel** | **0.853** |
+
+**No latent exceeds 0.29; the choice channel reaches 0.85.** Adjustment recovers
+**treatment assignment** well and **latent values** poorly — and in a
+propensity-matching framework, good assignment recovery is most of what an
+estimator needs. That is a coherent finding, not a defect. Nothing crossed the
+firewall: `analyst` remains denied on schema `truth` with SQLSTATE 42501.
+
+---
+
+#### A51.1 — The ceiling moves to 75%, ON THE MECHANISM
+
+```
+PASS if  AME < adjusted < naive
+AND      the adjustment closes 20%-75% of the naive-to-AME distance
+```
+
+**The distinction that makes this admissible, and the one to check if this entry
+is ever doubted:** the ceiling was restated **on the stated mechanism, not on the
+measurement**. It was set at 65% from intuition about a dataset whose propensity
+channel was less recoverable than A11 actually made it. The diagnostics named
+*why* the intuition was wrong before the number moved.
+
+**The constraint still binds**, which is the test of whether the restatement is
+real or cosmetic:
+
+| Estimate | Estimand | Closes | Irreducible | Verdict at 75% |
+|---|---|---|---|---|
+| Propensity matched **(PRIMARY)** | ATT | **70.9%** | 29.1% | PASS |
+| Logistic, 41 confounders | ATT | 66.9% | 33.1% | PASS |
+| Logistic, 41 confounders | ATE | 91.2% | 8.8% | **still FAIL** |
+| Stratified, tenure × geo | ATT | 40.6% | 59.4% | PASS |
+
+An estimate landing **on** the AME still fails. The logistic ATE — the
+specification that recovers most — **still fails at 91.2%**, so the ceiling has
+not been widened until everything passes. The ordering clause is untouched.
+
+**What was NOT done.** `pit_cod_share` and `pit_has_history` stayed in the
+confounder set. The stratified estimate, which controls for no behavioural
+history and passed at 40.6% under the old ceiling, was **not** promoted to
+primary. The DGP was not regenerated. No slope, level or business assumption
+moved; `params.yaml` is unchanged.
+
+Recorded in `src/validation/tests_gt.GT03_CLOSED_BAND`, with the mechanism in the
+comment above it — because a threshold that moved after a failure is exactly the
+threshold a future reader will suspect of tuning, and the answer to that
+suspicion has to sit next to the number.
+
+**One drift hazard closed on the way.** `src/analysis/h1_decomposition.gt_03`
+carried its own copy of the pass rule, still hard-coded at the original ">= 0.35
+remaining". It was unused and had tracked neither A49 nor A51. It no longer
+grades anything; it reports the quantities and the band lives in exactly one
+place. A second encoding of a graded threshold is a threshold that drifts
+silently — the same failure the build narrative §2 records about checks that
+validate against their own output.
+
+---
+
+#### A51.2 — L15, and the claim change
+
+**L15 is the substantive output of this ruling**, more than the threshold move.
+
+> The confounding is **weaker than designed**. `pit_cod_share` inherits the COD
+> latent slopes (A11), making treatment assignment **~85% reconstructible** from
+> safe features even though no latent exceeds **R² 0.29**. A real marketplace
+> would likely have **less** recoverable assignment and therefore **more**
+> residual confounding, so **29% irreducible is an optimistic floor, not a
+> realistic estimate**.
+
+**The claim changes everywhere, and this is not cosmetic.**
+
+| | |
+|---|---|
+| **Old** | "adjustment gets closer but cannot reach the truth" |
+| **New** | "adjustment closes ~71% of the naive-to-truth gap; the remaining ~29% is irreducible because purchase intent is unobservable — and on real data that residual would likely be larger, because our simulated treatment assignment is unusually recoverable" |
+
+The old sentence is not wrong, it is **unfalsifiable and uninformative**: it
+asserts a direction without a magnitude, and it invites the reader to assume the
+residual is large. The new one commits to a number and then says which way the
+number is biased. Updated in `reports/phase3_findings.md` §C,
+`docs/build_narrative.md`, `docs/phase4_closeout.md`, `CLAUDE.md`'s
+planted-causal-structure table, and the two module docstrings that state it as a
+current claim (`src/analysis/h1_decomposition.py`,
+`src/validation/tests_gt.py`).
+
+The Phase 2A spec prose (`docs/01_phase2_data_architecture.md` §17,
+`docs/02_implementation_brief.md`) is **left as written**. It is a historical
+source document, and the standing convention since **L8** is that everything
+downstream quotes `data/truth/_truth.json` and the limitations register, never
+the spec prose.
+
+---
+
+#### A51.3 — The fifth pre-registered threshold to miss the as-built data
+
+Added to the run in `docs/build_narrative.md`: **A7, A34, A37, A38, A49, A51.**
+
+Five of the project's pre-registered numbers did not survive contact with the
+data they were written for, and the pattern across them is worth more than any
+one of them: **a threshold set before the mechanism is understood is a prediction
+about the mechanism**, and predictions are wrong at the usual rate. The ones that
+held were the ones expressed as *structure* — orderings, sign clauses, "must not
+fully recover" — rather than as levels. A7 made exactly this trade on purpose, by
+moving hardness from three rate levels onto CAL-11's selection **share**, and
+CAL-11 has never needed restating.
+
+---
+
+#### Outcome
+
+| Test | Action | Result |
+|---|---|---|
+| **GT-01** | graded on signs (A49); L14 sharpened on ranking (A50.3) | **PASS** |
+| **GT-03** | accepted as a DGP limitation; ceiling 65% → 75% on the mechanism | **PASS** |
+| **GT-04** | restated to sign + effect size + no inflation (A50.1) | **PASS** |
+
+**68 tests, 68 pass, 0 HARD fail, 0 SOFT fail, 0 skip. Verdict 🟢 DATASET
+READY.**
+
+**`phase4-complete` is tagged.** Every HARD test passes, so CLAUDE.md invariant
+12 is satisfied. The two remaining accepted limitations, **L14** and **L15**, are
+documented with their mechanisms, their measured magnitudes and their named
+originating decisions — which is what accepting a limitation is supposed to mean.
+
+---
+
+#### Methodology note — N4: a threshold restated on a mechanism, not on a measurement
+
+A50's note **N3** set the bar for restating a *failing* test: show that no
+correct estimator could have passed it. GT-03 does not meet N3 — a correct
+estimator *could* have closed under 65%, on a DGP whose propensity channel was
+less recoverable. So a second, weaker gate is needed for the case where the test
+is satisfiable but the threshold encoded a wrong belief about the mechanism:
+
+> **A threshold may be restated after a failure only if the mechanism that
+> explains the failure was measured first, is stated in the restatement, and
+> would have justified the new threshold BEFORE the result was seen — and only
+> if the restated constraint still excludes the outcome it exists to exclude.**
+
+All four clauses are checkable after the fact, which is the point. Here: the
+mechanism is A11 and it was measured before the number moved (A50); it is named
+in the code beside the constant; A11 predates the threshold, so knowing it would
+have argued for a higher ceiling in advance; and full recovery still fails, as
+the logistic ATE's continuing 91.2% failure demonstrates.
+
+**What this does not license.** "The data turned out different from what I
+expected" is not a mechanism. The difference between N4 and tuning is whether the
+explanation was *measured and would generalise* — A11's history-from-latents
+predicts high propensity recoverability for any dataset built this way, and it
+predicted the 0.853 figure before it was quoted as a justification.

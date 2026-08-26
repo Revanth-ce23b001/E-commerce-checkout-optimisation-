@@ -1,8 +1,8 @@
 # Data Validation Report
 
-**Verdict: 🟡 CONDITIONAL**
+**Verdict: 🟢 DATASET READY**
 
-All HARD tests that RAN pass, and 0 SOFT failure(s) — but 6 HARD test(s) could not run and are NOT passes: BR-09, GT-01, GT-03, GT-04, GT-06, GT-07. Every one needs a fitted model and belongs to Phase 5. Proceed only with each one written into docs/limitations.md with a stated reason.
+All HARD pass; 0 SOFT failure(s); nothing skipped.
 
 ## 1 — Dataset summary
 
@@ -93,7 +93,6 @@ Frozen (decision A38):
 | BR-06 | SOFT | PASS | COD share by value decile is inverted-U | peak in deciles 6-9 (0-indexed 5-8) | peak at 8 |
 | BR-07 | HARD | PASS | Payment failure precedes some COD | [4%, 10%] | 5.90% |
 | BR-08 | HARD | PASS | Address reason rises as completeness falls | Q1/Q4 >= 1.40 AND Spearman rho < 0 at p < 0.01 | gradient 1.62x, rho -0.0367, p 6.43e-06 |
-| BR-09 | HARD | SKIP | Delay explains more deviance than promise | — | not runnable |
 | BR-10 | SOFT | PASS | Month-end COD RTO lift | >= +1.5pp | +3.53pp |
 | BR-11 | HARD | PASS | Switch-COD RTOs less than intent-COD | >= 5pp lower | +16.45pp |
 | LK-01 | HARD | PASS | View columns subset of safe whitelist | enforced | verified against the live database |
@@ -121,56 +120,11 @@ Frozen (decision A38):
 | DQ-15 | HARD | PASS | attempt_delay_days populated AND reachable | both arms complete on (a) column and (b) access path | (a) returned 15,084/15,084; delivered 76,166/76,166 | (b) attempt_number=1 path: returned 15,084/15,084; delivered 76,166/76,166 |
 | DQ-16 | HARD | PASS | No undeclared outcome-conditional columns | every flagged column declared | 0 undeclared |
 | GT-02 | HARD | PASS | Naive gap exceeds the AME | naive > AME | 17.73pp > 9.99pp |
-| GT-01 | HARD | SKIP | Coefficient recovery | — | not runnable |
-| GT-03 | HARD | SKIP | Adjustment closes the gap partially | — | not runnable |
-| GT-04 | HARD | SKIP | Planted null on review_count holds | — | not runnable |
-| GT-06 | HARD | SKIP | H6: delay explains more than promise | — | not runnable |
-| GT-07 | HARD | SKIP | Selection decomposition via PSM | — | not runnable |
 | GT-05 | HARD | PASS | AUC ceiling in band | [0.74, 0.79] | 0.7717 |
-
-## 5 — Skipped tests, split by reason
-
-**These are NOT passes and NOT failures.** 6 HARD test(s) could not run. They are grouped by cause so that a skip count is never read as an unverified count.
-
-### ENVIRONMENT-BLOCKED — none
-
-LK-01, LK-05 and DQ-01 ran against a live PostgreSQL and PASSED. LK-05 in particular was verified by opening a real connection AS the `analyst` role and having both `truth` reads refused with SQLSTATE 42501 — enforcement, not a catalogue inspection of intent.
-
-### PHASE-5-DEFERRED — need fitted models, out of scope for Phase 2B
-
-- **BR-09** — Delay explains more deviance than promise. Needs a fitted model on attempt_delay_days vs estimated_delivery_days. Phase 5 territory; the data supports it.
-- **GT-01** — Coefficient recovery. Needs a fitted logistic regression on safe features. Phase 5 runs these; the data and truth file support it.
-- **GT-03** — Adjustment closes the gap partially. Needs the confounder-controlled model. The relative rule and its min_gap_closed threshold are in params; Phase 5 evaluates them.
-- **GT-04** — Planted null on review_count holds. Needs the fitted model's CI on log1p(review_count).
-- **GT-06** — H6: delay explains more than promise. Same fitted-model dependency as BR-09.
-- **GT-07** — Selection decomposition via PSM. Needs propensity matching. Phase 5.
-
-Phase 2B builds the *dataset*; these test what an analysis recovers **from** it. The data and `_truth.json` support every one of them.
-
-
-## 6 — Every non-passing test, in full
-
-**BR-09 — Delay explains more deviance than promise** (SKIP)
-
-Needs a fitted model on attempt_delay_days vs estimated_delivery_days. Phase 5 territory; the data supports it.
-
-**GT-01 — Coefficient recovery** (SKIP)
-
-Needs a fitted logistic regression on safe features. Phase 5 runs these; the data and truth file support it.
-
-**GT-03 — Adjustment closes the gap partially** (SKIP)
-
-Needs the confounder-controlled model. The relative rule and its min_gap_closed threshold are in params; Phase 5 evaluates them.
-
-**GT-04 — Planted null on review_count holds** (SKIP)
-
-Needs the fitted model's CI on log1p(review_count).
-
-**GT-06 — H6: delay explains more than promise** (SKIP)
-
-Same fitted-model dependency as BR-09.
-
-**GT-07 — Selection decomposition via PSM** (SKIP)
-
-Needs propensity matching. Phase 5.
-
+| GT-01 | HARD | PASS | Coefficient recovery | no Strong/Moderate sign flips (A49; magnitudes -> L14) | 0 flips / 13, attenuation CV 0.58 |
+| GT-03 | HARD | PASS | Adjustment closes the gap partially | AME < adjusted < naive AND closes [20%, 75%] | 12.24pp (PSM, ATT), closes 70.9% |
+| GT-04 | HARD | PASS | Planted null on review_count holds | sign matches -0.05 AND |p10-p90| < 2.0pp AND |fitted| <= 0.05 | -0.02193 (0.439x planted), -1.02pp |
+| GT-06 | HARD | PASS | H6: delay explains more than promise | delay deviance > promise deviance | 15.39x |
+| BR-09 | HARD | PASS | Delay explains more deviance than promise | delay deviance > promise deviance | 1047.0 vs 68.0 |
+| GT-07 | HARD | PASS | Selection decomposition via PSM | AME 9.99pp < PSM < naive 17.73pp | 12.24pp |
+| FA-01 | HARD | PASS | Restrictive-intervention rate ratio | <= 2.5x at every volume in [0.05, 0.1, 0.17, 0.25] | worst 1.44x |

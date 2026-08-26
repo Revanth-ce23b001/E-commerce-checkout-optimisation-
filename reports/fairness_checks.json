@@ -1,0 +1,116 @@
+{
+  "fct_order_sha256": "49b066f06ed1fae63fb5ef65c88cbf5c1199f86c9267936d869b590357cd2aee",
+  "model": "M2 scorecard, per-tier thresholds (decision A47)",
+  "m2_test_auc": 0.7684,
+  "limit": 2.5,
+  "checks": {
+    "FA-01": {
+      "passed": true,
+      "detail": "vol 0.05: worst TIER3 / best METRO = 1.34; vol 0.10: worst TIER3 / best METRO = 1.44; vol 0.17: worst TIER3 / best METRO = 1.35; vol 0.25: worst TIER3 / best METRO = 1.3",
+      "by_volume": [
+        {
+          "volume_flagged": 0.05,
+          "rule": "per-tier",
+          "METRO": 0.0357,
+          "TIER1": 0.0405,
+          "TIER2": 0.047,
+          "TIER3": 0.0477,
+          "worst_tier": "TIER3",
+          "best_tier": "METRO",
+          "ratio": 1.34,
+          "verdict": "PASS"
+        },
+        {
+          "volume_flagged": 0.1,
+          "rule": "per-tier",
+          "METRO": 0.0642,
+          "TIER1": 0.0774,
+          "TIER2": 0.0907,
+          "TIER3": 0.0927,
+          "worst_tier": "TIER3",
+          "best_tier": "METRO",
+          "ratio": 1.44,
+          "verdict": "PASS"
+        },
+        {
+          "volume_flagged": 0.17,
+          "rule": "per-tier",
+          "METRO": 0.1109,
+          "TIER1": 0.1254,
+          "TIER2": 0.1442,
+          "TIER3": 0.1496,
+          "worst_tier": "TIER3",
+          "best_tier": "METRO",
+          "ratio": 1.35,
+          "verdict": "PASS"
+        },
+        {
+          "volume_flagged": 0.25,
+          "rule": "per-tier",
+          "METRO": 0.1641,
+          "TIER1": 0.1807,
+          "TIER2": 0.2054,
+          "TIER3": 0.2132,
+          "worst_tier": "TIER3",
+          "best_tier": "METRO",
+          "ratio": 1.3,
+          "verdict": "PASS"
+        }
+      ]
+    }
+  },
+  "price_of_fairness": [
+    {
+      "volume_flagged": 0.05,
+      "selected": 1126,
+      "global_n": 1000,
+      "global_delta_cm": 144382.0,
+      "global_per_order": 144.38,
+      "per-tier_n": 969,
+      "per-tier_delta_cm": 69401.0,
+      "per-tier_per_order": 71.62,
+      "price_of_fairness": 74981.0,
+      "price_per_restricted_order": 74.98,
+      "price_annualised_cr": 1.7
+    },
+    {
+      "volume_flagged": 0.1,
+      "selected": 2252,
+      "global_n": 1923,
+      "global_delta_cm": 211378.0,
+      "global_per_order": 109.92,
+      "per-tier_n": 1845,
+      "per-tier_delta_cm": 101720.0,
+      "per-tier_per_order": 55.13,
+      "price_of_fairness": 109658.0,
+      "price_per_restricted_order": 57.02,
+      "price_annualised_cr": 2.49
+    },
+    {
+      "volume_flagged": 0.17,
+      "selected": 3829,
+      "global_n": 3142,
+      "global_delta_cm": 295117.0,
+      "global_per_order": 93.93,
+      "per-tier_n": 3004,
+      "per-tier_delta_cm": 122483.0,
+      "per-tier_per_order": 40.77,
+      "price_of_fairness": 172634.0,
+      "price_per_restricted_order": 54.94,
+      "price_annualised_cr": 3.92
+    },
+    {
+      "volume_flagged": 0.25,
+      "selected": 5630,
+      "global_n": 4480,
+      "global_delta_cm": 341891.0,
+      "global_per_order": 76.31,
+      "per-tier_n": 4323,
+      "per-tier_delta_cm": 113400.0,
+      "per-tier_per_order": 26.23,
+      "price_of_fairness": 228491.0,
+      "price_per_restricted_order": 51.0,
+      "price_annualised_cr": 5.19
+    }
+  ]
+}

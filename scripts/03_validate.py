@@ -19,6 +19,14 @@ import pandas as pd
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
+# The verdict line carries an emoji (spec §18) and Windows consoles default to
+# cp1252, which cannot encode one. Without this the suite runs, writes the
+# report, and then dies on the last print -- a non-zero exit that looks like a
+# validation failure and is not one.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 from src.config.loader import load_params  # noqa: E402
 from src.validation.result import Severity, Status  # noqa: E402
 from src.validation.suite import run_suite  # noqa: E402
@@ -27,7 +35,7 @@ DATA = REPO_ROOT / "data" / "raw"
 TRUTH = REPO_ROOT / "data" / "truth" / "_truth.json"
 REPORT = REPO_ROOT / "reports" / "data_validation_report.md"
 
-FAMILIES = ("VOL", "CAL", "EC", "BR", "LK", "DQ", "GT")
+FAMILIES = ("VOL", "CAL", "EC", "BR", "LK", "DQ", "GT", "FA")
 
 
 def main(argv=None) -> int:

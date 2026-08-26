@@ -109,8 +109,10 @@ as a restatement of the delivery address.
 - **Not** that the naive COD–RTO gap is a causal estimate. It is 1.77× the truth.
 - **Not** that the regression's 10.67pp is "the right answer" — it lands 0.68pp
   above a truth it structurally cannot reach (§C.3, §C.6).
-- **Not** that GT-03 passes. Its ordering condition passes; the 0.35 magnitude
-  floor fails at 0.088, and **the open ruling on re-anchoring it is still open**.
+- **Not** that GT-03 passes — *as of Phase 3*. Its ordering condition passed; the
+  closure clause failed, and the ruling on re-anchoring it was left open.
+  **Superseded:** rulings A50 and A51 measured the mechanism, raised the ceiling
+  to 75% on it, and recorded **L15**. GT-03 now passes.
 - **Not** that 13.4pp / 19.9pp / 33% describe this dataset (L8).
 - **Not** that the annualisation factor is 240. It is derived, currently 227.26.
 - **Not** that censored orders are zero-cost (L9), or that `pit_avg_order_value`
@@ -182,7 +184,7 @@ as the person writing it.
 
 | Item | Status |
 |---|---|
-| GT-03's magnitude floor — re-anchor or record as failing | **Needs a ruling from someone other than whoever ran it** (§C.3) |
-| BR-09, GT-01/03/04/06/07 | Skipped; need fitted models |
+| GT-03's closure clause — re-anchor or record as failing | **RESOLVED** by A50 (measure the mechanism) then A51 (ceiling → 75%, limitation L15) |
+| BR-09, GT-01/03/04/06/07 | **RESOLVED** — all six run in Phase 4; all six pass |
 | `docs/data_generating_process.md` | Still absent |
 | ₹30.93 Cr recoverable | Placeholder until Phase 6 measures an ATE |

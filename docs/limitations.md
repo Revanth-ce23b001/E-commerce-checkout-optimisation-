@@ -442,3 +442,205 @@ events. The check that would catch it is not "is this column ever populated" but
 **What is not lost.** The promise side of H6 is fully testable and is measured
 (§D.5): +1.8pp of RTO per extra promised day at the honest specification, with
 most of the apparent promise effect turning out to be geography.
+
+---
+
+## L14 — Planted coefficient MAGNITUDES are not recoverable; signs and ranking are
+
+**Accepted by decision A49.** GT-01's magnitude clause is retired as a grading
+criterion and recorded here instead. GT-01 is now graded on its sign clause,
+which passes cleanly.
+
+**What.** A logistic regression of `rto_flag` on the reconstructed safe-feature
+design matrix recovers **0 sign flips across 13 Strong/Moderate relationships**
+and **8.0% of 25 testable coefficients inside the fitted 95% CI**, against the
+original clause's ≥80%.
+
+**Why — and it is a mechanism, not a defect.** Decision **A37** raised
+`post_dispatch_shock.noise_sd` from **0.85 to 3.3125** and **A38** froze it. The
+generator draws
+
+```
+logit(p) = Xβ + ε,     ε ~ N(0, 3.3125²)
+```
+
+A model fitted on `X` alone cannot see `ε`. It converges not on `β` but on
+`β / sqrt(1 + 3σ²/π²)` — textbook latent-noise attenuation. Predicted factor
+**0.480**, against **0.906** at the σ = 0.85 the clause was written for. GT-01's
+80% threshold is a σ = 0.85 figure, the same vintage as **L8**'s retired
+13.4pp / 19.9pp / 33%.
+
+### The attenuation factor, and the thing the mean hides
+
+Across the 13 Strong/Moderate relationships:
+
+| Statistic | Value |
+|---|---|
+| Mean recovered ÷ planted | **1.011** |
+| Median | 0.741 |
+| SD | 0.587 |
+| **Coefficient of variation** | **0.581** |
+| Range | 0.200 – 2.018 |
+| Attenuated (ratio < 1) | 7 terms |
+| Inflated (ratio ≥ 1) | 6 terms |
+
+**The attenuation is NOT uniform, and the mean of 1.011 is the most misleading
+number on this page.** It reads as "no attenuation at all". What it actually
+averages is two opposing effects:
+
+* **Seven terms are attenuated toward zero**, as predicted — `seller_rating`
+  0.20, `serviceability_z` 0.37, `address_completeness` 0.43, `is_new_customer`
+  0.58, `is_cod` 0.68, `month_end_x_cod` 0.74, `log1p_orders_delivered` 0.74.
+* **Six terms are inflated above 1.0** — `pit_rto_rate_shrunk` 1.19, the three
+  `geo_tier` contrasts 1.35–1.74, `paid_via_switch` 1.56,
+  `seller_sla_breach_rate` 2.02. These are exactly the terms that **proxy the
+  omitted latents and `shock.*` terms**, so omitted-variable bias pushes them up
+  while noise attenuation pushes everything else down.
+
+The two effects happen to cancel in the mean. Quoting the mean alone would assert
+that recovery is unbiased, which is the opposite of what is happening.
+
+### The attenuation is HETEROGENEOUS, so ranking is NOT guaranteed preserved
+
+State this plainly wherever the attenuation is quoted, because the convenient
+inference is available and it is invalid here.
+
+**The usual argument — *uniform attenuation is one common rescaling, so the
+ordering survives* — does not apply.** At CV 0.581 the attenuation is
+heterogeneous, and a heterogeneous rescaling can reorder terms arbitrarily.
+Nothing about A37's noise *guarantees* that the recovered ranking matches the
+planted one. Whether it does is an empirical question, and it was measured rather
+than assumed:
+
+* **Spearman ρ between |planted| and |fitted| across the 13: 0.823.**
+
+**That is high, so the ranking does survive — as a measured fact about this
+dataset, not as a property of the mechanism.** It could have come out low; it did
+not. Two terms account for most of the disagreement that remains:
+`seller_sla_breach_rate` (planted 1.20, fitted 2.42) overtakes `is_cod` (planted
+1.60, fitted 1.08), and `seller_rating_centered` (ratio 0.20) sinks below terms
+planted smaller than it. Both are on the inflated-proxy side of the split above.
+
+And the claim the risk model actually depends on is not the ranking of
+*coefficients* but the ranking of *orders*. That is measured by AUC: **0.7530**
+(M1) and **0.7684** (M2) against a **0.7717** achievable ceiling — within 0.4pp
+of the best any model could do on this data. **The risk model is fine.**
+
+Re-measure ρ if `post_dispatch_noise_sd` ever moves. It is not implied by the CV
+and cannot be carried forward from this run.
+
+### What cannot be tested at all
+
+Eight planted terms are excluded from the denominator because no safe-feature
+model can estimate them: three latents (`latent_intent`, `latent_liquidity`,
+`latent_trust` — invariant 4 keeps them in a schema `analyst` is denied on) and
+five `shock.*` terms (the Stage-4 bar). Named explicitly in
+`src/analysis/gt_recovery.py:UNTESTABLE` so the exemption cannot quietly widen.
+
+### Consequence for any future magnitude test
+
+Under σ = 3.3125, **no test comparing a fitted coefficient's CI to an
+un-attenuated planted value can pass at this sample size.** GT-04 demonstrated it
+independently: planted −0.05, fitted −0.0219, ratio 0.439 against the predicted
+0.480; the CI half-width is 0.0136 while the attenuation gap is 0.0281, twice as
+wide. Any such test must compare against `planted × expected_attenuation(σ)`, or
+test signs, ordering, or one-sided inflation instead.
+
+**This generalisation is what retired GT-04's coverage clause.** Ruling **A50**
+restated GT-04 from *"the CI contains −0.05"* to sign + effect-size +
+`|fitted| ≤ |planted|`, and it now **passes**. The third clause is one-sided on
+purpose: attenuation below the plant is the expected, harmless direction, while a
+magnitude *above* the plant is the over-fitting the test exists to catch.
+
+**Decisions.** A37 (the noise), A38 (the freeze), A49 (this acceptance),
+A50 (GT-04's second restatement, on this limitation's own generalisation).
+
+---
+
+## L15 — The confounding is weaker than designed; the residual is an optimistic floor
+
+**Accepted by decision A51**, on the diagnostics ruling **A50** ordered. This is
+the most important limitation on this page for anyone quoting a causal number out
+of this project.
+
+**What.** The observed confounder set recovers **more** of the COD–RTO selection
+component than the design intended. The propensity match closes **70.9%** of the
+naive-to-AME distance and the logistic ATT closes **66.9%**, against a ceiling
+originally set at 65%.
+
+**Why — and it is not leakage.** A50 measured both candidate explanations
+directly (`reports/gt03_diagnostics.md`, `make gt03`):
+
+| Target | Kind | Order-level R² | Customer-level R² |
+|---|---|---|---|
+| `latent_intent` | latent | 0.151 | 0.161 |
+| `latent_trust` | latent | 0.220 | 0.225 |
+| `latent_liquidity` | latent | 0.288 | **0.295** |
+| `true_cod_propensity` | **choice channel** | 0.819 | **0.853** |
+
+**No latent is substantially reconstructible** — the highest is 0.295, under the
+0.35 bar — so "unobservable by construction" holds exactly as written, and
+nothing crossed the firewall. `analyst` is still denied on schema `truth` with
+SQLSTATE 42501, asserted inside the cross-check.
+
+What *is* reconstructible is **treatment assignment**. Decision **A11** generates
+pre-window history from the **same latent slopes** that drive current COD choice,
+which makes `pit_cod_share` close to a **sufficient statistic for the propensity
+score**. The propensity model's own AUC of **0.835** says the same from the other
+side. And in a matching framework, recovering assignment well is most of what an
+estimator needs — so the adjustment recovers **assignment well and latent values
+poorly**, which is a coherent finding rather than a defect.
+
+The deviance table makes the same point from a third angle: the top three
+gap-closers are all COD-choice history and are collectively under 3% of explained
+deviance, while `courier_reliability_score` carries **10.6%** of explained
+deviance and closes **nothing** — it explains RTO without explaining COD choice.
+
+| Confounder | Deviance share | Closure lost if dropped |
+|---|---|---|
+| `pit_cod_share` | 1.5% | **+8.06pp** |
+| `pit_has_history` | 0.9% | **+5.05pp** |
+| `has_saved_prepaid_instrument` | 0.6% | +2.77pp |
+| `courier_reliability_score` | **10.6%** | **−0.36pp** |
+
+**What we gave up — and this is the part to carry into any write-up.** A real
+marketplace would almost certainly have **less recoverable treatment assignment**
+than this simulation does. Real COD choice is driven by transient, unrecorded
+things — who is home that week, whether the card was declined at a different
+merchant, what a relative advised — none of which lands in a `pit_*` aggregate.
+A real propensity model would score well below 0.835, and correspondingly **more
+residual confounding would survive adjustment**.
+
+> **So the ~29% irreducible residual measured here is an OPTIMISTIC FLOOR, not a
+> realistic estimate.** On real data the unexplained share would very likely be
+> larger. Never present 29% as "how much confounding survives adjustment in
+> practice"; present it as "how much survived even when assignment was unusually
+> easy to model".
+
+**What would change if it were modelled differently.** Severing A11's
+history-from-latents — drawing pre-window history from its own noise rather than
+from the latent slopes — would drop the choice channel's recoverability, push
+closure back under 65%, and make the residual more realistic. It would also
+change the data-generating process, invalidate the whole Phase 3 analysis, and
+break the property that a customer's history is *consistent* with the latents
+that produced them. **It was not done, and A51 records why:** the finding is
+coherent, it is documented, and re-generating to make an intuition-set threshold
+come out right is the failure mode this project exists to avoid.
+
+**What was NOT done to make this pass.** `pit_cod_share` and `pit_has_history`
+were not dropped from the confounder set; the stratified estimate (which controls
+for no behavioural history and would have passed at 40.6%) was not promoted to
+primary; and the ceiling was raised **on the stated mechanism, not on the
+measured 70.9%** — 70.9% and 66.9% both sit inside [20%, 75%] with room, and an
+estimate landing on the AME still fails.
+
+**Where it is checked.** `GT-03` (HARD), band in
+`src/validation/tests_gt.GT03_CLOSED_BAND`. Diagnostics in
+`src/analysis/gt03_diagnostics.py`, regenerated by `make gt03`.
+
+**Related.** [[L14]] (what *is* and is not recoverable about the planted
+coefficients), L11 (`true_cod_propensity` is NULL for 6% of customers, so the
+0.853 figure is measured on the 94% that have one).
+
+**Decisions.** A11 (history from latents), A50 (the diagnostics), A51 (this
+acceptance and the 75% ceiling).

@@ -1,6 +1,6 @@
 """Validation result types and the report row format.
 
-Every test in the seven families (VOL, CAL, EC, BR, LK, DQ, GT) returns a
+Every test in the eight families (VOL, CAL, EC, BR, LK, DQ, GT, FA) returns a
 :class:`TestResult`. HARD failures block the dataset; SOFT failures are logged and
 require written sign-off in ``docs/validation.md``.
 
@@ -164,4 +164,6 @@ def _skip_cause(skipped) -> str:
         return "They need a live PostgreSQL or a fitted model (Phase 5)."
     if needs_db:
         return "They need a live PostgreSQL."
-    return "Every one needs a fitted model and belongs to Phase 5."
+    if ids == {"FA-01"}:
+        return "It needs the fitted M2 and its published fairness result (A47)."
+    return "Every one needs a fitted model."

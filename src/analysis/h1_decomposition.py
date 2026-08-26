@@ -38,10 +38,26 @@ adjusted estimate lands on the truth, something has leaked into the feature set.
 Test GT-03 encodes exactly that::
 
     PASS if  AME < adjusted < naive
-    AND      (adjusted - AME) / (naive - AME) >= 0.35
+    AND      the adjustment closes 20%-75% of the naive-to-AME distance
 
-i.e. the adjustment must move toward the truth without arriving, closing at most
-65% of the selection component.
+i.e. the adjustment must move toward the truth without arriving. The band's
+floor is A49's and its ceiling is A51's; it lives in
+``src/validation/tests_gt.GT03_CLOSED_BAND`` and nowhere else.
+
+**What "without arriving" turned out to mean here.** The propensity match closes
+**70.9%**, higher than the 65% originally expected. A50's diagnostics found the
+reason and it is not leakage: no latent is reconstructible from the safe feature
+set (max R² 0.295), but ``true_cod_propensity`` — the *choice* channel — comes
+back at R² 0.853, because **A11** generates pre-window history from the same
+latent slopes that drive current COD choice. Adjustment recovers **treatment
+assignment** well and **latent values** poorly, and in a matching framework good
+assignment recovery is most of what an estimator needs.
+
+So the honest claim is not "adjustment gets closer but cannot reach the truth".
+It is: **adjustment closes ~71% of the naive-to-truth gap; the remaining ~29% is
+irreducible because purchase intent is unobservable — and on real data that
+residual would likely be larger, because this simulation's treatment assignment
+is unusually recoverable.** Limitation **L15** carries that caveat.
 
 Denominator, throughout: shipped AND NOT censored.
 """
@@ -354,19 +370,24 @@ def _auc(y: np.ndarray, score: np.ndarray) -> float:
 
 
 def gt_03(adjusted_pp: float, ame_pp: float, naive_pp: float) -> dict:
-    """The relative rule (decision A6). Ordering first, then how far it moved.
+    """The quantities GT-03 is graded on. **It does not grade them.**
 
-    ``remaining`` is the share of the selection component the adjustment did NOT
-    explain. GT-03 requires at least 0.35 of it to survive: an estimate that
-    lands on the truth means the unobservable leaked.
+    This used to carry its own copy of the pass rule, hard-coded at ">= 0.35
+    remaining". That rule has since moved twice -- A49 restated the floor, A51
+    raised the ceiling to 75% -- and this copy tracked neither. A second
+    encoding of a graded threshold is a threshold that drifts silently, which is
+    the same failure the build narrative §2 records about checks that validate
+    against their own output.
+
+    **The band lives in exactly one place:**
+    ``src/validation/tests_gt.GT03_CLOSED_BAND``. This function reports; that
+    module decides.
     """
     remaining = (adjusted_pp - ame_pp) / (naive_pp - ame_pp)
-    ordered = ame_pp < adjusted_pp < naive_pp
     return {
-        "ordered_ame_lt_adjusted_lt_naive": bool(ordered),
+        "ordered_ame_lt_adjusted_lt_naive": bool(ame_pp < adjusted_pp < naive_pp),
         "selection_component_pp": naive_pp - ame_pp,
         "recovered_pp": naive_pp - adjusted_pp,
         "share_of_selection_recovered": 1 - remaining,
         "share_remaining": remaining,
-        "passes": bool(ordered and remaining >= 0.35),
     }

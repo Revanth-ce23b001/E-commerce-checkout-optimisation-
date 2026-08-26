@@ -1,4 +1,4 @@
-"""The validation suite — 62 tests, seven families, run against the generated data.
+"""The validation suite — 63 tests, eight families, run against the generated data.
 
 This is deliberately separate from ``tests/``. ``tests/`` unit-tests the
 *generator code*; this tests the *dataset* against business targets. Conflating
@@ -85,7 +85,11 @@ def _band(value, target: dict) -> bool:
 def run_suite(params, tables: dict, truth: dict, ledger, extra: dict) -> ResultSet:
     """Run every family. Returns the full ResultSet for the report."""
     results = ResultSet()
-    for family in (_vol, _cal, _ec, _br, _lk, _dq, _gt):
+    from src.validation.tests_fa import run_fa
+    from src.validation.tests_gt import run_gt_fitted
+
+    for family in (_vol, _cal, _ec, _br, _lk, _dq, _gt,
+                   run_gt_fitted, run_fa):
         family(results, params, tables, truth, ledger, extra)
     return results
 
@@ -336,9 +340,7 @@ def _br(results, params, tables, truth, ledger, extra) -> None:
 
     results.add(_br_08(tables))
 
-    results.add(_skip("BR-09", "Delay explains more deviance than promise", Severity.HARD,
-                      "Needs a fitted model on attempt_delay_days vs "
-                      "estimated_delivery_days. Phase 5 territory; the data supports it."))
+    # BR-09 is fitted alongside GT-06 in tests_gt (one model, two clauses).
 
     # dim_date.date_id round-trips through parquet as object; fct_order.order_date
     # as datetime64. Normalise both before joining rather than relying on either.
@@ -769,21 +771,7 @@ def _gt(results, params, tables, truth, ledger, extra) -> None:
                    f"{naive:.2f}pp > {ame:.2f}pp",
                    "Relative rule (decision A6/A7). The absolute band is dropped."))
 
-    for test_id, name, reason in (
-        ("GT-01", "Coefficient recovery",
-         "Needs a fitted logistic regression on safe features. Phase 5 runs these; "
-         "the data and truth file support it."),
-        ("GT-03", "Adjustment closes the gap partially",
-         "Needs the confounder-controlled model. The relative rule and its "
-         "min_gap_closed threshold are in params; Phase 5 evaluates them."),
-        ("GT-04", "Planted null on review_count holds",
-         "Needs the fitted model's CI on log1p(review_count)."),
-        ("GT-06", "H6: delay explains more than promise",
-         "Same fitted-model dependency as BR-09."),
-        ("GT-07", "Selection decomposition via PSM",
-         "Needs propensity matching. Phase 5."),
-    ):
-        results.add(_skip(test_id, name, Severity.HARD, reason))
+    # GT-01/03/04/06/07 are fitted in tests_gt, together with BR-09.
 
     band = params.require("ground_truth.gt_05.auc_ceiling_band")
     ceiling = truth["achieved"]["auc_ceiling_precheckout"]

@@ -6,7 +6,7 @@ support a case study on COD, RTO risk and contribution margin. 105,605 orders,
 
 This page is about the build, not the output. The output is in
 `reports/data_validation_report.md`; the full reasoning is in
-`docs/decision_register.md`, 45 rulings long. What follows is the part worth
+`docs/decision_register.md`, 51 rulings long. What follows is the part worth
 carrying to the next project.
 
 The one-line version: **the dataset was the easy half.** The hard half was
@@ -15,12 +15,21 @@ verification.
 
 ---
 
-## 1. Four places the specification contradicted itself
+## 1. Six pre-registered numbers that did not survive the as-built data
 
-The spec was written before any code ran. Four of its internal inconsistencies
-only surfaced once the numbers were real. In each case the interesting part is
-not the defect — it is *what the ruling had to turn on*, because there was no
-purely technical answer available.
+The spec was written before any code ran, and so were the validation thresholds.
+Six of those numbers turned out to describe a dataset other than the one that got
+built. They split into two kinds, and the split matters:
+
+* **A7, A34, A37, A38** — the spec **contradicted itself**. Two of its own
+  statements could not both be true, and the contradiction only surfaced once the
+  numbers were real.
+* **A49, A51** — a **pre-registered threshold encoded a wrong belief about the
+  mechanism**. Nothing contradicted anything; the number was simply a prediction,
+  and predictions are wrong at the usual rate.
+
+In every case the interesting part is not the defect — it is *what the ruling had
+to turn on*, because there was no purely technical answer available.
 
 **A7 — three hard targets, one knob.** COD RTO (24%), prepaid RTO (4.1%) and
 blended RTO (16.5%) were all HARD. But the only free parameter is the RTO
@@ -96,6 +105,34 @@ There the parameter won.
 
 Splitting was the point. Applying one rule to both — "formulas always win", or
 "targets always win" — would have been tidier and wrong in one of the two cases.
+
+**A49 and A51 — thresholds written before there was a model to measure.** Six
+tests needed fitted models and stayed SKIP through two phases. When they finally
+ran, three failed, and two of the three failed because the *threshold* was wrong
+rather than the data.
+
+GT-04 asked the fitted 95% CI to contain the planted −0.05. Unsatisfiable: under
+A37's noise the estimator converges on −0.05 × 0.480, and the CI half-width
+(0.0136) is about half the attenuation gap (0.0281). GT-03 asked the adjustment to
+close at most 65% of the naive-to-truth distance; it closed 70.9%, because A11
+generates pre-window history from the same latent slopes that drive COD choice,
+which makes the customer's own COD share close to a sufficient statistic for the
+propensity score.
+
+*What the rulings turned on:* **the difference between a test that failed and a
+test that could not have passed** — and the two got different treatment. GT-04's
+clause was unsatisfiable by arithmetic that generalises beyond the test, so it was
+restated. GT-03's was satisfiable, so restating it required more: the mechanism
+had to be *measured first* and had to be one that would have argued for the new
+threshold in advance. Both gates are written down (register notes **N3** and
+**N4**), because the failure mode they guard against — re-anchor until it passes —
+looks identical from the outside to legitimate correction.
+
+**The pattern across all six.** A threshold set before the mechanism is understood
+is a **prediction about the mechanism**. The ones that held were expressed as
+*structure* — orderings, sign clauses, "must not fully recover" — not as levels.
+A7 made exactly that trade deliberately, moving hardness off three rate levels
+onto CAL-11's selection **share**, and CAL-11 has never needed restating.
 
 ---
 
@@ -240,11 +277,36 @@ selection. That number is the reason the dataset exists, and it is why one test
 is designed to *fail* to fully recover the truth: an adjusted estimate that lands
 exactly on the planted value would mean the unobservable had leaked.
 
-Final state: 65 validation tests, 59 pass, 0 hard failures, 0 soft failures, 6
-deferred to a later phase because they need fitted models. 170 unit tests. Every
-figure downstream reads a machine-written truth file rather than the spec's
-prose, because on three separate occasions the prose turned out to describe a
-dataset that no longer existed.
+**How far a competent adjustment actually gets, measured rather than asserted.**
+The propensity match closes **~71%** of the naive-to-truth gap. The remaining
+**~29%** is irreducible, because purchase intent is unobservable by construction
+and no query in this library can reach it.
+
+**And the residual is an optimistic floor, not a realistic estimate.** This is the
+sentence that took a diagnostic to earn. When the adjustment over-recovered, the
+two candidate explanations were "a latent leaked" and "the confounding is weaker
+than designed", and they were measured apart rather than argued about: no latent
+comes back above **R² 0.29** from the safe feature set, but `true_cod_propensity`
+— the *choice* channel — comes back at **0.85**. Decision A11 generates pre-window
+history from the same latent slopes that drive current COD choice, so the
+customer's own COD share is nearly a sufficient statistic for the propensity
+score. The adjustment recovers **treatment assignment** well and **latent values**
+poorly, and in a matching framework that is most of what it needs.
+
+A real marketplace would have less recoverable assignment — real COD choice turns
+on who is home that week and whether a card was declined somewhere else, none of
+which lands in a `pit_*` aggregate — and therefore **more** residual confounding.
+So 29% is how much survived when assignment was unusually easy to model. It is
+recorded as limitation **L15**, and it is a better finding than the clean number
+would have been.
+
+Final state: **68 validation tests, 68 pass, 0 hard failures, 0 soft failures, 0
+skips** — the first point in the project at which every HARD test has both run and
+passed. 238 unit tests. Two accepted limitations, **L14** and **L15**, each with a
+measured mechanism and a named originating decision. Every figure downstream reads
+a machine-written truth file rather than the spec's prose, because on three
+separate occasions the prose turned out to describe a dataset that no longer
+existed.
 
 ---
 
@@ -264,3 +326,5 @@ The habits that actually caught things:
 - When several expectations miss together and land together, **the shared input is the defect.**
 - **Test the fix by breaking it**, not by trusting it.
 - Leave the wrong predictions in.
+- Before moving a threshold that failed, **measure the mechanism first** — and
+  write down whether it would have argued for the new number *in advance*.
